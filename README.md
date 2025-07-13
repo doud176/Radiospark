@@ -22,4 +22,5 @@ L'application Radiospark a vocation à remplacer les logiciels métiers de gesti
 ## 📦 Installation
 
 - Téléchargement et exécution possible à : https://github.com/doud176/Radiospark/tags
-- Avant l'exécution de l'application, ajouter un logo radioactif au format PNG à la racine de votre lecteur C: au chemin suivant : "C:\radioactif.png"
+- Avant l'exécution de l'application, ajouter un logo radioactif au format PNG à la racine de votre lecteur C: au chemin suivant : "C:\radioactif.png" vous pourrez en trouver à l'adresse suivante : https://www.flaticon.com/fr/chercher?word=radioactif
+
