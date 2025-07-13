@@ -1,17 +1,17 @@
 # Radiospark
 
-L'application a vocation à remplacer les logiciels métiers de gestion des radiopharmaceutique lors de l'indisponibilité prolongée de ces derniers.
+L'application Radiospark a vocation à remplacer les logiciels métiers de gestion des radiopharmaceutique lors de l'indisponibilité prolongée de ces derniers.
 
 ## 🚀 Fonctionnalités
 
-- [1] Gestion d'une banque de radionucléides et de MRP
-- [2] Création de MRP
-- [3] Gestion des patients
-- [4] Gestion des générateurs
-- [5] Dispensation de seringues
-- [6] Historique de seringues et des MRP produits
-- [7] Options
-- [8] Calculatrice de décroissance
+- Gestion d'une banque de radionucléides et de MRP
+- Création de MRP
+- Gestion des patients
+- Gestion des générateurs
+- Dispensation de seringues
+- Historique de seringues et des MRP produits
+- Options
+- Calculatrice de décroissance
 
 ## 🛠️ Technologies utilisées
 
