@@ -18,3 +18,8 @@ L'application Radiospark a vocation à remplacer les logiciels métiers de gesti
 - Langage : Python
 - Framework : Aucun
 - Base de données : Locale avec Pickle
+
+## 📦 Installation
+
+- Téléchargement et exécution possible à : https://github.com/doud176/Radiospark/tags
+- Avant l'exécution de l'application, ajouter un logo radioactif au format PNG à la racine de votre lecteur C: au chemin suivant : "C:\radioactif.png"
