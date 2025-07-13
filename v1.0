@@ -33,6 +33,8 @@ class MRP:
         self.activity_dispensed = 0.0  # sum of dispensed activities
         self.numero_prep = numero_prep  # Numéro de préparation unique
         self.expiration_mrp = expiration_mrp  # Datetime d'expiration MRP
+        self.lot_generateur = ""  # Lot du générateur utilisé
+        self.date_exp_generateur = None  # Date d'expiration du générateur
 
     def get_current_activity(self):
         """Calculate theoretical activity based on decay"""
@@ -45,6 +47,14 @@ class MRP:
         current_activity = self.get_current_activity()
         remaining_activity = current_activity - self.activity_dispensed
         return max(0, remaining_activity)  # Ensure non-negative value
+    
+    def get_volume_restant(self):
+        """Get remaining volume with bounds checking"""
+        # S'assurer que le volume restant ne soit jamais négatif
+        volume_restant = max(0, self.volume_restant)
+        # S'assurer que le volume restant ne soit jamais supérieur au volume initial
+        volume_restant = min(volume_restant, self.volume)
+        return volume_restant
 
 
 # --- Main Application ---
@@ -63,7 +73,7 @@ class Application(tk.Tk):
         title_label.pack(pady=(10, 0))
 
         # Barre de statut
-        self.status_var = tk.StringVar(value="Bienvenue dans Radiospark ! Contact : elefebvre.ph@gmail.com")
+        self.status_var = tk.StringVar(value="Bienvenue dans Radiospark !       Contact : elefebvre.ph@gmail.com        Développement : Edouard Lefebvre")
         self.status_bar = ttk.Label(self, textvariable=self.status_var, anchor="w", relief="sunken", font=("Segoe UI", 10))
         self.status_bar.pack(side="bottom", fill="x")
 
@@ -209,7 +219,8 @@ class Application(tk.Tk):
             "Radionuclide:",
             "Stabilité (h):",
             "Numéro de lot du générateur:",
-            "Date d'expiration du générateur:"
+            "Date d'expiration du générateur:",
+            "MRP:"
         ]
         self.mrp_entries = {}
         for i, text in enumerate(labels, start=1):  # Start from row 1 since row 0 is for banque MRP
@@ -224,6 +235,11 @@ class Application(tk.Tk):
                 self.mrp_generateur_cb.grid(row=i, column=1, padx=5, pady=5)
                 self.update_generateur_combobox()
                 self.mrp_generateur_cb.bind('<<ComboboxSelected>>', self.on_generateur_selected)
+            elif text == "MRP:":
+                self.mrp_banque_mrp_cb = ttk.Combobox(form_frame, state="readonly")
+                self.mrp_banque_mrp_cb.grid(row=i, column=1, padx=5, pady=5)
+                self.update_mrp_banque_mrp_combobox()
+                self.mrp_banque_mrp_cb.bind('<<ComboboxSelected>>', self.on_mrp_class_selected)
             else:
                 entry = ttk.Entry(form_frame)
                 entry.grid(row=i, column=1, padx=5, pady=5)
@@ -245,7 +261,7 @@ class Application(tk.Tk):
         tree_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
         colonnes = ("Nom", "N° Préparation", "Lot", "Expiration", "Activité initiale", "Volume initial",
-                    "Activité actuelle", "Volume actuel", "Radionuclide", "Création", "Expiration MRP", "Lot générateur", "Expiration générateur")
+                    "Activité actuelle", "Volume actuel", "Radionuclide", "Création", "Expiration MRP", "Lot générateur", "Expiration générateur", "MRP")
         self.tree_mrp = ttk.Treeview(tree_frame, columns=colonnes, show="headings", height=8)
         for col in colonnes:
             self.tree_mrp.heading(col, text=col)
@@ -256,16 +272,7 @@ class Application(tk.Tk):
         sel = self.mrp_banque_cb.get()
         item = next((item for item in self.banque_mrp if item["nom"] == sel), None)
         if item:
-            # Extract the name without parentheses
-            name_parts = item["nom"].split("(")
-            base_name = name_parts[0].strip()
-            radionuclide = self.mrp_radionuclide_cb.get()
-            
-            # Set the name as radionuclide + "-" + base name
-            self.mrp_entries["Nom de la préparation:"].delete(0, tk.END)
-            self.mrp_entries["Nom de la préparation:"].insert(0, f"{radionuclide}-{base_name}")
-            
-            # Fill other fields
+            # Fill other fields first
             self.mrp_entries["Activité initiale (MBq):"].delete(0, tk.END)
             self.mrp_entries["Activité initiale (MBq):"].insert(0, item["activite"])
             self.mrp_entries["Volume de la solution (mL):"].delete(0, tk.END)
@@ -275,12 +282,71 @@ class Application(tk.Tk):
             # Remplir la stabilité
             self.mrp_entries["Stabilité (h):"].delete(0, tk.END)
             self.mrp_entries["Stabilité (h):"].insert(0, item.get("stabilite", ""))
+            
+            # Pré-remplir la combobox MRP avec la valeur MRP du MRP sélectionné
+            mrp_value = item.get("mrp", "")
+            if mrp_value and hasattr(self, 'mrp_banque_mrp_cb'):
+                # Trouver l'index de la valeur MRP dans la combobox
+                mrp_values = list(self.mrp_banque_mrp_cb['values'])
+                try:
+                    mrp_index = mrp_values.index(mrp_value)
+                    self.mrp_banque_mrp_cb.current(mrp_index)
+                except ValueError:
+                    # Si la valeur n'est pas trouvée, la définir directement
+                    self.mrp_banque_mrp_cb.set(mrp_value)
+            
+            # Generate the preparation name after filling other fields
+            radionuclide = self.mrp_radionuclide_cb.get()
+            if radionuclide:
+                # Extract the name without parentheses
+                name_parts = item["nom"].split("(")
+                base_name = name_parts[0].strip()
+                
+                # Set the name as radionuclide + "-" + base name
+                self.mrp_entries["Nom de la préparation:"].delete(0, tk.END)
+                self.mrp_entries["Nom de la préparation:"].insert(0, f"{radionuclide}-{base_name}")
+
+    def on_mrp_class_selected(self, event):
+        """Lorsqu'une classe MRP est sélectionnée dans l'onglet Création MRP"""
+        selected_class = self.mrp_banque_mrp_cb.get()
+        if selected_class and selected_class != "Toutes les classes":
+            # Filtrer les MRP de la banque qui appartiennent à cette classe
+            mrp_in_class = [item for item in self.banque_mrp if item.get("mrp", "") == selected_class]
+            
+            # Mettre à jour la combobox de la banque MRP avec seulement les MRP de cette classe
+            noms_mrp_classe = [item["nom"] for item in mrp_in_class]
+            self.mrp_banque_cb['values'] = noms_mrp_classe
+            if noms_mrp_classe:
+                self.mrp_banque_cb.current(0)
+                # Déclencher automatiquement la sélection du premier MRP de la classe
+                self.on_banque_mrp_selected(None)
+            else:
+                self.mrp_banque_cb.set("")
+        else:
+            # Si "Toutes les classes" est sélectionnée ou aucune classe, afficher tous les MRP
+            self.update_banque_mrp_combobox()
 
     def update_banque_mrp_combobox(self):
         noms = [item["nom"] for item in self.banque_mrp]
         self.mrp_banque_cb['values'] = noms
         if noms:
             self.mrp_banque_cb.current(0)
+
+    def update_mrp_banque_mrp_combobox(self):
+        # Récupérer toutes les valeurs MRP uniques (classes) de la banque de MRP
+        mrp_classes = set()
+        for item in self.banque_mrp:
+            mrp_value = item.get("mrp", "")
+            if mrp_value:  # Ne pas inclure les valeurs vides
+                mrp_classes.add(mrp_value)
+        
+        # Convertir en liste et trier, ajouter l'option "Toutes les classes"
+        mrp_values = ["Toutes les classes"] + sorted(list(mrp_classes))
+        self.mrp_banque_mrp_cb['values'] = mrp_values
+        if mrp_values:
+            self.mrp_banque_mrp_cb.current(0)
+        else:
+            self.mrp_banque_mrp_cb.set("")
 
     def update_radionuclide_combobox(self):
         noms = [r.nom for r in self.radionuclides]
@@ -298,27 +364,29 @@ class Application(tk.Tk):
         for mrp in self.mrp_solutions:
             creation_str = mrp.creation_time.strftime("%Y-%m-%d %H:%M")
             activite_actuelle = mrp.get_effective_activity()
-            volume_actuel = mrp.volume_restant
+            volume_actuel = mrp.get_volume_restant()
             numero_prep = getattr(mrp, 'numero_prep', "")
             expiration_mrp_dt = getattr(mrp, 'expiration_mrp', None)
             expiration_mrp = expiration_mrp_dt.strftime("%Y-%m-%d %H:%M") if expiration_mrp_dt else ""
             lot_generateur = getattr(mrp, 'lot_generateur', "")
             date_exp_generateur = getattr(mrp, 'date_exp_generateur', None)
-            date_exp_generateur_str = date_exp_generateur.strftime("%Y-%m-%d") if date_exp_generateur else ""
+            date_exp_generateur_str = date_exp_generateur.strftime("%Y-%m-%d") if date_exp_generateur else "N/A" if lot_generateur == "" else ""
+            mrp_value = getattr(mrp, 'mrp', "")
             item = (
                 mrp.nom,
                 numero_prep,
                 mrp.lot,
                 mrp.date_expiration.strftime("%Y-%m-%d"),
                 f"{mrp.activite_initiale:.2f}",
-                f"{mrp.volume:.2f}",
+                f"{mrp.volume:.3f}",
                 f"{activite_actuelle:.2f}",
-                f"{volume_actuel:.2f}",
+                f"{volume_actuel:.3f}",
                 mrp.radionuclide.nom,
                 creation_str,
                 expiration_mrp,
                 lot_generateur,
-                date_exp_generateur_str
+                date_exp_generateur_str,
+                mrp_value
             )
             self.tree_mrp.insert("", tk.END, values=item)
         self.save_data()
@@ -379,15 +447,21 @@ class Application(tk.Tk):
         # Champs générateur
         lot_generateur = self.mrp_generateur_cb.get() if hasattr(self, 'mrp_generateur_cb') else ""
         date_exp_generateur = self.mrp_entries["Date d'expiration du générateur:"].get() if "Date d'expiration du générateur:" in self.mrp_entries else ""
-        try:
-            date_exp_generateur_dt = datetime.strptime(date_exp_generateur, "%Y-%m-%d").date() if date_exp_generateur else None
-        except Exception:
+        
+        # Gérer le cas "Pas de Générateur"
+        if lot_generateur == "Pas de Générateur":
+            lot_generateur = ""
             date_exp_generateur_dt = None
+        else:
+            try:
+                date_exp_generateur_dt = datetime.strptime(date_exp_generateur, "%Y-%m-%d").date() if date_exp_generateur and date_exp_generateur != "N/A" else None
+            except Exception:
+                date_exp_generateur_dt = None
 
         # Génération du numéro de préparation
         date_str = creation_time.strftime('%y%m%d')
         nb_today = sum(1 for m in self.mrp_solutions if m.creation_time.strftime('%y%m%d') == date_str)
-        numero_prep = f"S{date_str}_{nb_today+1:03d}"
+        numero_prep = f"P{date_str}_{nb_today+1:03d}"
 
         # Récupérer la stabilité depuis le champ utilisateur
         try:
@@ -396,10 +470,12 @@ class Application(tk.Tk):
             stabilite_heure = 6
         expiration_mrp = creation_time + timedelta(hours=stabilite_heure)
 
-        # Ajout des champs générateur dans l'objet MRP (en attributs dynamiques)
+        # Création de l'objet MRP avec les champs générateur
         mrp = MRP(nom, activite, volume, radionuclide, lot, date_exp, creation_time, numero_prep, expiration_mrp)
         mrp.lot_generateur = lot_generateur
-        mrp.date_exp_generateur = date_exp_generateur_dt
+        setattr(mrp, 'date_exp_generateur', date_exp_generateur_dt)
+        mrp_value = self.mrp_banque_mrp_cb.get() if hasattr(self, 'mrp_banque_mrp_cb') else ""
+        setattr(mrp, 'mrp', mrp_value)
         self.mrp_solutions.append(mrp)
         self.update_mrp_tree()
         self.update_disp_mrp_combobox()
@@ -422,7 +498,8 @@ class Application(tk.Tk):
             "numero_prep": numero_prep,
             "expiration_mrp": expiration_mrp,
             "lot_generateur": lot_generateur,
-            "date_exp_generateur": date_exp_generateur_dt
+            "date_exp_generateur": date_exp_generateur_dt,
+            "mrp": mrp_value
         }
         self.historique_mrp.append(historique_entry)
 
@@ -509,7 +586,7 @@ class Application(tk.Tk):
         form_frame = ttk.Frame(self.banque_mrp_frame)
         form_frame.pack(fill="x", padx=5, pady=5)
 
-        labels = ["Nom du MRP:", "Radionuclide:", "Activité (MBq):", "Volume final (mL):", "Indication:", "Stabilité (h):"]
+        labels = ["Nom du MRP:", "Radionuclide:", "Activité (MBq):", "Volume final (mL):", "Indication:", "Stabilité (h):", "MRP:"]
         self.banque_mrp_entries = {}
         for i, text in enumerate(labels):
             lbl = ttk.Label(form_frame, text=text)
@@ -540,7 +617,7 @@ class Application(tk.Tk):
         tree_frame = ttk.Frame(self.banque_mrp_frame)
         tree_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
-        colonnes = ("Nom du MRP", "Radionuclide", "Activité (MBq)", "Volume final (mL)", "Indication", "Stabilité (h)")
+        colonnes = ("Nom du MRP", "Radionuclide", "Activité (MBq)", "Volume final (mL)", "Indication", "Stabilité (h)", "MRP")
         self.tree_banque_mrp = ttk.Treeview(tree_frame, columns=colonnes, show="headings", height=8)
         for col in colonnes:
             self.tree_banque_mrp.heading(col, text=col)
@@ -569,6 +646,7 @@ class Application(tk.Tk):
                 self.banque_mrp_entries["Volume final (mL):"].insert(0, str(rec["volume_final"]))
                 self.banque_mrp_entries["Indication:"].insert(0, rec["indication"])
                 self.banque_mrp_entries["Stabilité (h):"].insert(0, rec.get("stabilite", ""))
+                self.banque_mrp_entries["MRP:"].insert(0, rec.get("mrp", ""))
 
     def ajouter_banque_mrp(self):
         nom = self.banque_mrp_entries["Nom du MRP:"].get()
@@ -590,9 +668,10 @@ class Application(tk.Tk):
 
         indication = self.banque_mrp_entries["Indication:"].get()
         stabilite = self.banque_mrp_entries["Stabilité (h):"].get()
+        mrp = self.banque_mrp_entries["MRP:"].get()
 
         # Vérifier si le MRP existe déjà
-        if any(mrp["nom"] == nom for mrp in self.banque_mrp):
+        if any(mrp_item["nom"] == nom for mrp_item in self.banque_mrp):
             messagebox.showerror("Erreur", "Un MRP avec ce nom existe déjà.")
             return
 
@@ -602,11 +681,13 @@ class Application(tk.Tk):
             "activite": activite,
             "volume_final": volume_final,
             "indication": indication,
-            "stabilite": stabilite
+            "stabilite": stabilite,
+            "mrp": mrp
         }
         self.banque_mrp.append(mrp_archive)
         self.update_banque_mrp_tree()
         self.update_banque_mrp_combobox()  # MAJ combobox dans Création MRP
+        self.update_mrp_banque_mrp_combobox()  # MAJ combobox MRP dans Création MRP
         # Réinitialiser les champs
         for entry in self.banque_mrp_entries.values():
             entry.delete(0, tk.END)
@@ -622,8 +703,9 @@ class Application(tk.Tk):
                 self.tree_banque_mrp.delete(i)
             for item in self.banque_mrp:
                 stabilite = item.get("stabilite", "")  # Champ vide par défaut
+                mrp = item.get("mrp", "")  # Champ MRP vide par défaut
                 values = (item["nom"], item["radionuclide"], f"{item['activite']:.2f}",
-                         f"{item['volume_final']:.2f}", item["indication"], stabilite)
+                         f"{item['volume_final']:.3f}", item["indication"], stabilite, mrp)
                 self.tree_banque_mrp.insert("", tk.END, values=values)
 
     def modifier_banque_mrp(self):
@@ -657,9 +739,10 @@ class Application(tk.Tk):
 
         new_indication = self.banque_mrp_entries["Indication:"].get()
         new_stabilite = self.banque_mrp_entries["Stabilité (h):"].get()
+        new_mrp = self.banque_mrp_entries["MRP:"].get()
 
         # Vérifier si le nouveau nom existe déjà (sauf pour le MRP en cours de modification)
-        if new_nom != rec["nom"] and any(mrp["nom"] == new_nom for mrp in self.banque_mrp):
+        if new_nom != rec["nom"] and any(mrp_item["nom"] == new_nom for mrp_item in self.banque_mrp):
             messagebox.showerror("Erreur", "Un MRP avec ce nom existe déjà.")
             return
 
@@ -669,19 +752,22 @@ class Application(tk.Tk):
         rec["volume_final"] = new_vol
         rec["indication"] = new_indication
         rec["stabilite"] = new_stabilite
+        rec["mrp"] = new_mrp
 
         self.update_banque_mrp_tree()
         self.update_banque_mrp_combobox()  # MAJ combobox dans Création MRP
+        self.update_mrp_banque_mrp_combobox()  # MAJ combobox MRP dans Création MRP
         self.save_data()
         messagebox.showinfo("Succès", "MRP modifié avec succès.")
 
     def supprimer_banque_mrp(self):
         if messagebox.askyesno("Confirmation", "Voulez-vous vraiment supprimer toutes les données de la Banque de MRP ?"):
-            self.banque_mrp = []
-            self.update_banque_mrp_tree()
-            self.update_banque_mrp_combobox()  # MAJ combobox dans Création MRP
-            self.save_data()
-            messagebox.showinfo("Succès", "Les données de la Banque de MRP ont été supprimées.")
+                    self.banque_mrp = []
+        self.update_banque_mrp_tree()
+        self.update_banque_mrp_combobox()  # MAJ combobox dans Création MRP
+        self.update_mrp_banque_mrp_combobox()  # MAJ combobox MRP dans Création MRP
+        self.save_data()
+        messagebox.showinfo("Succès", "Les données de la Banque de MRP ont été supprimées.")
 
     # --- Patients Tab ---
 
@@ -745,9 +831,17 @@ class Application(tk.Tk):
         bouton_supprimer_patient.pack(pady=5)
 
     def update_patient_mrp_combobox(self):
-        noms = [mrp.nom for mrp in self.mrp_solutions]
-        self.patient_mrp_cb['values'] = noms
-        if noms:
+        # Récupérer toutes les classes MRP uniques de la banque de MRP
+        mrp_classes = set()
+        for item in self.banque_mrp:
+            mrp_value = item.get("mrp", "")
+            if mrp_value:  # Ne pas inclure les valeurs vides
+                mrp_classes.add(mrp_value)
+        
+        # Convertir en liste et trier
+        mrp_values = sorted(list(mrp_classes))
+        self.patient_mrp_cb['values'] = mrp_values
+        if mrp_values:
             self.patient_mrp_cb.current(0)
         else:
             self.patient_mrp_cb.set("")
@@ -797,7 +891,7 @@ class Application(tk.Tk):
             "activite": activite,
             "poids": poids,
             "date_naissance": date_naissance_str,
-            "mrp_prescrit": mrp_prescrit,
+            "mrp_prescrit": mrp_prescrit,  # Maintenant c'est une classe MRP
             "valide": False
         }
         self.patients.append(patient)
@@ -938,14 +1032,6 @@ class Application(tk.Tk):
         self.update_mrp_expired_status()  # Initial check
         self.disp_mrp_cb.bind('<<ComboboxSelected>>', lambda e: self.update_mrp_expired_status())
 
-    def update_disp_mrp_combobox(self):
-        noms = [mrp.nom for mrp in self.mrp_solutions]
-        self.disp_mrp_cb['values'] = noms
-        if noms:
-            self.disp_mrp_cb.current(0)
-        else:
-            self.disp_mrp_cb.set("")
-
     def actualiser_dispensation(self):
         # --- Sauvegarde la clé stable de la sélection avant update ---
         selection = self.tree_disp.selection()
@@ -959,15 +1045,19 @@ class Application(tk.Tk):
         for i in self.tree_disp.get_children():
             self.tree_disp.delete(i)
         selected_nom = self.disp_mrp_cb.get()
-        mrp_selected = next((m for m in self.mrp_solutions if m.nom == selected_nom), None)
+        mrp_selected = self.get_mrp_from_display_name(selected_nom)
         if not mrp_selected:
             return
         t = (datetime.now() - mrp_selected.creation_time).total_seconds()
         lambda_ = math.log(2) / mrp_selected.radionuclide.demi_vie
         current_activity = mrp_selected.activite_initiale * math.exp(-lambda_ * t)
         effective_activity = max(0, current_activity - mrp_selected.activity_dispensed)
-        activite_volumique = effective_activity / mrp_selected.volume_restant if mrp_selected.volume_restant > 0 else 0
-        patients_filtered = [p for p in self.patients if p["mrp_prescrit"] == selected_nom]
+        volume_restant = mrp_selected.get_volume_restant()
+        activite_volumique = effective_activity / volume_restant if volume_restant > 0 else 0
+        
+        # Filtrer les patients par classe MRP au lieu de nom MRP individuel
+        mrp_class = getattr(mrp_selected, 'mrp', "")
+        patients_filtered = [p for p in self.patients if p["mrp_prescrit"] == mrp_class]
         total_activite_prelevee = 0.0
         total_volume_preleve = 0.0
         for idx, patient in enumerate(patients_filtered):
@@ -977,7 +1067,8 @@ class Application(tk.Tk):
                 t_injection = (date_injection - mrp_selected.creation_time).total_seconds()
                 activite_injection = mrp_selected.activite_initiale * math.exp(-lambda_ * t_injection)
                 effective_activity_injection = max(0, activite_injection - total_activite_prelevee)
-                volume_restant_injection = mrp_selected.volume - total_volume_preleve
+                volume_restant_injection = max(0, mrp_selected.volume - total_volume_preleve)
+                volume_restant_injection = min(volume_restant_injection, mrp_selected.volume)  # Ne pas dépasser le volume initial
                 activite_volumique_injection = effective_activity_injection / volume_restant_injection if volume_restant_injection > 0 else 0
                 volume_a_prelever = patient["activite"] / activite_volumique_injection if activite_volumique_injection > 0 else 0
                 delta_t = (date_injection - datetime.now()).total_seconds()
@@ -1018,7 +1109,7 @@ class Application(tk.Tk):
                         activite_a_heure_injection = ""
                     activite_a_prelever_float = float(activite_a_prelever) if activite_a_prelever else 0
                     if activite_a_prelever_float > 0:
-                        volume_preleve_affiche = f"{float(volume_a_prelever) * activite_prelevee_float / activite_a_prelever_float:.2f}"
+                        volume_preleve_affiche = f"{float(volume_a_prelever) * activite_prelevee_float / activite_a_prelever_float:.3f}"
                     else:
                         volume_preleve_affiche = ""
                 except Exception:
@@ -1029,7 +1120,7 @@ class Application(tk.Tk):
                 patient.get('date_naissance', 'N/A'),
                 patient["heure"],
                 f"{patient['activite']:.2f}",
-                f"{volume_a_prelever:.2f}",
+                f"{volume_a_prelever:.3f}",
                 f"{activite_a_prelever:.2f}",
                 activite_prelevee,
                 volume_preleve_affiche,
@@ -1066,7 +1157,7 @@ class Application(tk.Tk):
 
     def update_activity_display(self):
         selected_nom = self.disp_mrp_cb.get()
-        mrp_selected = next((m for m in self.mrp_solutions if m.nom == selected_nom), None)
+        mrp_selected = self.get_mrp_from_display_name(selected_nom)
         if mrp_selected:
             # Calcul de l'activité actuelle avec décroissance
             t = (datetime.now() - mrp_selected.creation_time).total_seconds()
@@ -1075,16 +1166,17 @@ class Application(tk.Tk):
             effective_activity = max(0, current_activity - mrp_selected.activity_dispensed)
             
             # Calcul de l'activite volumique actuelle
-            activite_volumique = effective_activity / mrp_selected.volume_restant if mrp_selected.volume_restant > 0 else 0
+            volume_restant = mrp_selected.get_volume_restant()
+            activite_volumique = effective_activity / volume_restant if volume_restant > 0 else 0
             
             self.label_current_activity.config(text=f"Activité: {effective_activity:.2f} MBq")
             self.label_activite_volumique.config(text=f"Activité volumique: {activite_volumique:.2f} MBq/mL")
-            self.label_volume_restant.config(text=f"Volume restant: {mrp_selected.volume_restant:.2f} mL")
+            self.label_volume_restant.config(text=f"Volume restant: {volume_restant:.3f} mL")
             info = (f"Nom: {mrp_selected.nom}\n"
                     f"Lot: {mrp_selected.lot}\n"
                     f"Expiration: {mrp_selected.date_expiration.strftime('%Y-%m-%d')}\n"
                     f"Activité initiale: {mrp_selected.activite_initiale:.2f} MBq\n"
-                    f"Volume initial: {mrp_selected.volume:.2f} mL\n"
+                    f"Volume initial: {mrp_selected.volume:.3f} mL\n"
                     f"Radionuclide: {mrp_selected.radionuclide.nom}\n"
                     f"Heure de création: {mrp_selected.creation_time.strftime('%H:%M')}")
             self.label_mrp_info.config(text="Informations MRP:\n" + info)
@@ -1105,17 +1197,20 @@ class Application(tk.Tk):
         # item est maintenant la clé nom||heure
         key_nom, key_heure = item.split("||", 1)
         selected_nom = self.disp_mrp_cb.get()
-        patients_filtered = [p for p in self.patients if p["mrp_prescrit"] == selected_nom]
+        mrp_selected = self.get_mrp_from_display_name(selected_nom)
+        if not mrp_selected:
+            messagebox.showerror("Erreur", "Aucune solution MRP sélectionnée.")
+            return
+        
+        # Filtrer les patients par classe MRP
+        mrp_class = getattr(mrp_selected, 'mrp', "")
+        patients_filtered = [p for p in self.patients if p["mrp_prescrit"] == mrp_class]
         patient = next((p for p in patients_filtered if p["nom"] == key_nom and p["heure"] == key_heure), None)
         if not patient:
             messagebox.showerror("Erreur", "Patient non trouvé.")
             return
         if patient.get("valide"):
             messagebox.showinfo("Info", "Ce prélèvement a déjà été validé.")
-            return
-        mrp_selected = next((m for m in self.mrp_solutions if m.nom == selected_nom), None)
-        if not mrp_selected:
-            messagebox.showerror("Erreur", "Aucune solution MRP sélectionnée.")
             return
         effective_activity = mrp_selected.get_effective_activity()
         try:
@@ -1124,7 +1219,8 @@ class Application(tk.Tk):
             t_injection = (date_injection - mrp_selected.creation_time).total_seconds()
             lambda_ = math.log(2) / mrp_selected.radionuclide.demi_vie
             activite_injection = mrp_selected.activite_initiale * math.exp(-lambda_ * t_injection)
-            activite_volumique_injection = activite_injection / mrp_selected.volume_restant if mrp_selected.volume_restant > 0 else 0
+            volume_restant = mrp_selected.get_volume_restant()
+            activite_volumique_injection = activite_injection / volume_restant if volume_restant > 0 else 0
             volume_prelever = patient["activite"] / activite_volumique_injection if activite_volumique_injection > 0 else 0
         except Exception:
             volume_prelever = patient["activite"] / effective_activity if effective_activity > 0 else 0
@@ -1142,14 +1238,23 @@ class Application(tk.Tk):
         syringe_time = datetime.now()
         mrp_expiration_dt = datetime.combine(mrp_selected.date_expiration, time(23, 59, 59))
         heure_expiration = min(syringe_time + timedelta(minutes=30), mrp_expiration_dt)
-        # Mise à jour du MRP
-        mrp_selected.volume_restant -= volume_prelever
+        # Mise à jour du MRP avec vérifications
+        nouveau_volume = mrp_selected.volume_restant - volume_prelever
+        if nouveau_volume < 0:
+            messagebox.showerror("Erreur", "Le volume restant ne peut pas être négatif.")
+            return
+        if nouveau_volume > mrp_selected.volume:
+            messagebox.showerror("Erreur", "Le volume restant ne peut pas être supérieur au volume initial.")
+            return
+        
+        mrp_selected.volume_restant = nouveau_volume
         mrp_selected.activity_dispensed += activite_prelevee
         # Mise à jour du patient
         patient["activite_prelevee"] = activite_prelevee  # Stocker en float
         patient["heure_expiration"] = heure_expiration.strftime("%H:%M")
         patient["valide"] = True
         patient["volume_preleve"] = volume_prelever  # Stocker en float
+        patient["mrp_utilise"] = self.get_simple_mrp_name(selected_nom)  # Sauvegarder le nom simple du MRP utilisé
         try:
             patient["activite_volumique_validation"] = activite_volumique_injection
         except Exception:
@@ -1175,7 +1280,12 @@ class Application(tk.Tk):
             "action": "Validé",
             "activite_prelevee": f"{activite_prelevee:.2f}",
             "heure_expiration": patient["heure_expiration"],
-            "num_seringue": num_seringue
+            "num_seringue": num_seringue,
+            "date_naissance": patient.get("date_naissance", ""),
+            "poids": patient.get("poids", ""),
+            "numero_prep": getattr(mrp_selected, 'numero_prep', ""),
+            "heure_injection": patient.get("heure", ""),
+            "mrp_utilise": self.get_simple_mrp_name(selected_nom)  # Sauvegarder le nom simple du MRP utilisé
         }
         self.historique_seringues.append(historique_entry)
         messagebox.showinfo("Succès", f"Prélèvement validé pour {patient['nom']} (N° {num_seringue}).")
@@ -1190,7 +1300,14 @@ class Application(tk.Tk):
         item = selected_item[0]
         key_nom, key_heure = item.split("||", 1)
         selected_nom = self.disp_mrp_cb.get()
-        patients_filtered = [p for p in self.patients if p["mrp_prescrit"] == selected_nom]
+        mrp_selected = self.get_mrp_from_display_name(selected_nom)
+        if not mrp_selected:
+            messagebox.showerror("Erreur", "Aucune solution MRP sélectionnée.")
+            return
+        
+        # Filtrer les patients par classe MRP
+        mrp_class = getattr(mrp_selected, 'mrp', "")
+        patients_filtered = [p for p in self.patients if p["mrp_prescrit"] == mrp_class]
         patient = next((p for p in patients_filtered if p["nom"] == key_nom and p["heure"] == key_heure), None)
         if not patient:
             messagebox.showerror("Erreur", "Patient non trouvé.")
@@ -1198,14 +1315,31 @@ class Application(tk.Tk):
         if not patient.get("valide"):
             messagebox.showerror("Erreur", "Ce prélèvement n'est pas validé, impossible d'invalider.")
             return
-        mrp_selected = next((m for m in self.mrp_solutions if m.nom == selected_nom), None)
-        if not mrp_selected:
-            messagebox.showerror("Erreur", "Aucune solution MRP sélectionnée.")
+        
+        # Récupérer le MRP qui a été réellement utilisé pour ce prélèvement
+        mrp_utilise_nom = patient.get("mrp_utilise", "")
+        if not mrp_utilise_nom:
+            messagebox.showerror("Erreur", "Impossible de déterminer le MRP utilisé pour ce prélèvement.")
             return
+        
+        # Le mrp_utilise_nom peut être un nom d'affichage complet, on doit extraire le nom simple
+        mrp_utilise_nom_simple = self.get_simple_mrp_name(mrp_utilise_nom)
+        mrp_utilise = next((m for m in self.mrp_solutions if m.nom == mrp_utilise_nom_simple), None)
+        if not mrp_utilise:
+            messagebox.showerror("Erreur", "Le MRP utilisé pour ce prélèvement n'existe plus.")
+            return
+        
         volume_preleve = float(patient.get("volume_preleve", 0))
         activite_prelevee = float(patient.get("activite_prelevee", 0))
-        mrp_selected.volume_restant += volume_preleve
-        mrp_selected.activity_dispensed -= activite_prelevee
+        
+        # Restaurer l'activité et le volume dans le MRP qui a été réellement utilisé avec vérifications
+        nouveau_volume = mrp_utilise.volume_restant + volume_preleve
+        if nouveau_volume > mrp_utilise.volume:
+            messagebox.showerror("Erreur", "Le volume restant ne peut pas être supérieur au volume initial.")
+            return
+        
+        mrp_utilise.volume_restant = nouveau_volume
+        mrp_utilise.activity_dispensed -= activite_prelevee
         patient["valide"] = False
         patient["activite_prelevee"] = ""
         patient["heure_expiration"] = ""
@@ -1219,7 +1353,12 @@ class Application(tk.Tk):
             "mrp": selected_nom,
             "action": "Non validée",
             "activite_prelevee": f"{activite_prelevee:.2f}",
-            "heure_expiration": ""
+            "heure_expiration": "",
+            "date_naissance": patient.get("date_naissance", ""),
+            "poids": patient.get("poids", ""),
+            "numero_prep": getattr(mrp_selected, 'numero_prep', ""),
+            "heure_injection": patient.get("heure", ""),
+            "mrp_utilise": mrp_utilise_nom_simple  # Sauvegarder le nom simple du MRP qui a été utilisé
         }
         self.historique_seringues.append(historique_entry)
         messagebox.showinfo("Succès", f"Prélèvement invalidé pour {patient['nom']}.")
@@ -1236,9 +1375,15 @@ class Application(tk.Tk):
         # item est maintenant la clé nom||heure
         key_nom, key_heure = item.split("||", 1)
         selected_nom = self.disp_mrp_cb.get()
-        patients_filtered = [p for p in self.patients if p["mrp_prescrit"] == selected_nom]
+        mrp_selected = self.get_mrp_from_display_name(selected_nom)
+        if not mrp_selected:
+            messagebox.showerror("Erreur", "Aucune solution MRP sélectionnée.")
+            return
+        
+        # Filtrer les patients par classe MRP
+        mrp_class = getattr(mrp_selected, 'mrp', "")
+        patients_filtered = [p for p in self.patients if p["mrp_prescrit"] == mrp_class]
         patient = next((p for p in patients_filtered if p["nom"] == key_nom and p["heure"] == key_heure), None)
-        mrp_selected = next((m for m in self.mrp_solutions if m.nom == selected_nom), None)
         if patient and mrp_selected and patient.get("valide"):
             self.imprimer_etiquette(patient, mrp_selected)
         else:
@@ -1292,7 +1437,7 @@ class Application(tk.Tk):
         y -= espace_ligne
 
         # Image de radiation en bas à droite
-        image_path = r"C:/Users/Edoua/Dev/Projet Radiopharmacie/radiation.png"
+        image_path = r"C:\radioactif.png"
         try:
             img_size = 50  # en points, pour ne pas empiéter
             c.drawImage(image_path, largeur_defaut_pts - img_size - 4, 4, width=img_size, height=img_size, preserveAspectRatio=True, mask='auto')
@@ -1401,7 +1546,14 @@ class Application(tk.Tk):
         item = selected_item[0]
         key_nom, key_heure = item.split("||", 1)
         selected_nom = self.disp_mrp_cb.get()
-        patients_filtered = [p for p in self.patients if p["mrp_prescrit"] == selected_nom]
+        mrp_selected = self.get_mrp_from_display_name(selected_nom)
+        if not mrp_selected:
+            messagebox.showerror("Erreur", "Aucune solution MRP sélectionnée.")
+            return
+        
+        # Filtrer les patients par classe MRP
+        mrp_class = getattr(mrp_selected, 'mrp', "")
+        patients_filtered = [p for p in self.patients if p["mrp_prescrit"] == mrp_class]
         patient = next((p for p in patients_filtered if p["nom"] == key_nom and p["heure"] == key_heure), None)
         if not patient:
             messagebox.showerror("Erreur", "Patient non trouvé.")
@@ -1454,7 +1606,7 @@ class Application(tk.Tk):
         tree_frame = ttk.Frame(self.histo_frame)
         tree_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
-        colonnes = ("Date", "Patient", "Poids", "Date de naissance", "MRP", "N° Préparation", "Etat", "Activité à l'heure d'injection", "Heure d'expiration", "N° Seringue", "Lot générateur")
+        colonnes = ("Date", "Patient", "Poids", "Date de naissance", "MRP", "N° Préparation", "Etat", "Activité à l'heure d'injection", "Heure d'expiration", "N° Seringue")
         self.tree_histo = ttk.Treeview(tree_frame, columns=colonnes, show="headings", height=10)
         
         # Scrollbar verticale
@@ -1496,43 +1648,31 @@ class Application(tk.Tk):
         for i in self.tree_histo.get_children():
             self.tree_histo.delete(i)
         for entry in filtered:
-            # Recherche du patient pour la date de naissance et le poids
-            patient = next((p for p in self.patients if p["nom"] == entry["patient"]), None)
-            if not patient:
-                patient = next((p for p in getattr(self, 'historique_patients', []) if p["nom"] == entry["patient"]), None)
-            date_naissance = patient.get("date_naissance", "") if patient else ""
-            poids = patient.get("poids", "") if patient else ""
-            # Recherche du MRP pour le numéro de préparation
-            mrp = next((m for m in self.mrp_solutions if m.nom == entry["mrp"]), None)
-            numero_prep = getattr(mrp, 'numero_prep', "") if mrp else ""
-            lot_generateur = getattr(mrp, 'lot_generateur', "") if mrp else ""
-            
-            # Calcul de l'activité à l'heure d'injection
+            date_naissance = entry.get("date_naissance", "")
+            poids = entry.get("poids", "")
+            numero_prep = entry.get("numero_prep", "")
+            heure_injection = entry.get("heure_injection", "")
             activite_a_heure_injection = "N/A"
             try:
-                if patient and mrp and entry.get("activite_prelevee"):
+                if entry.get("activite_prelevee") and heure_injection:
                     activite_prelevee = float(entry["activite_prelevee"])
-                    heure_injection = datetime.strptime(patient.get('heure', ''), "%H:%M").time()
-                    date_injection = datetime.combine(datetime.now().date(), heure_injection)
-                    
-                    # Calcul du delta t entre date dispensation et heure d'injection
                     date_dispensation_str = entry.get("date", "")
-                    if date_dispensation_str and heure_injection:
+                    if date_dispensation_str:
                         dt_disp = datetime.strptime(date_dispensation_str, "%Y-%m-%d %H:%M")
-                        dt_injection = datetime.combine(dt_disp.date(), heure_injection)
-                        # Si l'heure d'injection est antérieure à la dispensation, prendre le lendemain
+                        heure_inj = datetime.strptime(heure_injection, "%H:%M").time()
+                        dt_injection = datetime.combine(dt_disp.date(), heure_inj)
                         if dt_injection < dt_disp:
                             dt_injection = dt_injection + timedelta(days=1)
-                        t_decay = (dt_injection - dt_disp).total_seconds()
-                        demi_vie = mrp.radionuclide.demi_vie
+                        mrp = next((m for m in self.mrp_solutions if m.nom == entry["mrp"]), None)
+                        demi_vie = mrp.radionuclide.demi_vie if mrp else 21600
                         lambda_rad = math.log(2) / demi_vie
+                        t_decay = (dt_injection - dt_disp).total_seconds()
                         activite_a_heure_injection = activite_prelevee * math.exp(-lambda_rad * t_decay)
                         activite_a_heure_injection = f"{activite_a_heure_injection:.2f}"
             except Exception:
                 activite_a_heure_injection = "N/A"
-            
             values = (entry["date"], entry["patient"], poids, date_naissance, entry["mrp"], numero_prep, entry["action"],
-                     activite_a_heure_injection, entry["heure_expiration"], entry.get("num_seringue", ""), lot_generateur)
+                     activite_a_heure_injection, entry["heure_expiration"], entry.get("num_seringue", ""))
             self.tree_histo.insert("", tk.END, values=values)
 
     def update_historique_tree(self):
@@ -1541,35 +1681,31 @@ class Application(tk.Tk):
         for i in self.tree_histo.get_children():
             self.tree_histo.delete(i)
         for entry in self.historique_seringues:
-            patient = next((p for p in self.patients if p["nom"] == entry["patient"]), None)
-            if not patient:
-                patient = next((p for p in getattr(self, 'historique_patients', []) if p["nom"] == entry["patient"]), None)
-            date_naissance = patient.get("date_naissance", "") if patient else ""
-            poids = patient.get("poids", "") if patient else ""
-            mrp = next((m for m in self.mrp_solutions if m.nom == entry["mrp"]), None)
-            numero_prep = getattr(mrp, 'numero_prep', "") if mrp else ""
-            lot_generateur = getattr(mrp, 'lot_generateur', "") if mrp else ""
+            date_naissance = entry.get("date_naissance", "")
+            poids = entry.get("poids", "")
+            numero_prep = entry.get("numero_prep", "")
+            heure_injection = entry.get("heure_injection", "")
             activite_a_heure_injection = "N/A"
             try:
-                if patient and mrp and entry.get("activite_prelevee"):
+                if entry.get("activite_prelevee") and heure_injection:
                     activite_prelevee = float(entry["activite_prelevee"])
-                    heure_injection = datetime.strptime(patient.get('heure', ''), "%H:%M").time()
-                    date_injection = datetime.combine(datetime.now().date(), heure_injection)
                     date_dispensation_str = entry.get("date", "")
-                    if date_dispensation_str and heure_injection:
+                    if date_dispensation_str:
                         dt_disp = datetime.strptime(date_dispensation_str, "%Y-%m-%d %H:%M")
-                        dt_injection = datetime.combine(dt_disp.date(), heure_injection)
+                        heure_inj = datetime.strptime(heure_injection, "%H:%M").time()
+                        dt_injection = datetime.combine(dt_disp.date(), heure_inj)
                         if dt_injection < dt_disp:
                             dt_injection = dt_injection + timedelta(days=1)
-                        t_decay = (dt_injection - dt_disp).total_seconds()
-                        demi_vie = mrp.radionuclide.demi_vie
+                        mrp = next((m for m in self.mrp_solutions if m.nom == entry["mrp"]), None)
+                        demi_vie = mrp.radionuclide.demi_vie if mrp else 21600
                         lambda_rad = math.log(2) / demi_vie
+                        t_decay = (dt_injection - dt_disp).total_seconds()
                         activite_a_heure_injection = activite_prelevee * math.exp(-lambda_rad * t_decay)
                         activite_a_heure_injection = f"{activite_a_heure_injection:.2f}"
             except Exception:
                 activite_a_heure_injection = "N/A"
             values = (entry["date"], entry["patient"], poids, date_naissance, entry["mrp"], numero_prep, entry["action"],
-                     activite_a_heure_injection, entry["heure_expiration"], entry.get("num_seringue", ""), lot_generateur)
+                     activite_a_heure_injection, entry["heure_expiration"], entry.get("num_seringue", ""))
             self.tree_histo.insert("", tk.END, values=values)
         self.save_data()
 
@@ -1593,10 +1729,10 @@ class Application(tk.Tk):
             c.drawString(margin_left, 19.5*cm, "Historique des seringues")
             
             # Headers avec largeurs optimisées
-            headers = ("Date", "Patient", "Poids", "Date de naissance", "MRP", "N° Préparation", "Action", "Activité à l'heure d'injection", "Heure d'expiration", "N° Seringue", "Lot générateur")
+            headers = ("Date", "Patient", "Poids", "Date de naissance", "MRP", "N° Préparation", "Action", "Activité à l'heure d'injection", "Heure d'expiration", "N° Seringue")
             
             # Largeurs des colonnes (en cm) - total = 28.7cm
-            column_widths = [3.5, 3.5, 2.5, 3.5, 4.0, 3.0, 2.5, 4.0, 3.0, 2.2, 2.5]
+            column_widths = [3.5, 3.5, 2.5, 3.5, 4.0, 3.0, 2.5, 4.0, 3.0, 2.2]
             
             # Calcul des positions X pour éviter le chevauchement
             x_positions = []
@@ -1658,13 +1794,9 @@ class Application(tk.Tk):
                     c.setFont("Helvetica", 8)
                     y -= 0.4*cm
                 
-                # Recherche du patient pour la date de naissance et le poids
-                patient = next((p for p in self.patients if p["nom"] == entry["patient"]), None)
-                if not patient:
-                    patient = next((p for p in getattr(self, 'historique_patients', []) if p["nom"] == entry["patient"]), None)
-                date_naissance = patient.get("date_naissance", "") if patient else ""
-                poids = patient.get("poids", "") if patient else ""
-                # Recherche du MRP pour le numéro de préparation
+                # Utiliser directement les données sauvegardées dans l'historique
+                date_naissance = entry.get("date_naissance", "")
+                poids = entry.get("poids", "")
                 mrp = next((m for m in self.mrp_solutions if m.nom == entry["mrp"]), None)
                 numero_prep = getattr(mrp, 'numero_prep', "") if mrp else ""
                 lot_generateur = getattr(mrp, 'lot_generateur', "") if mrp else ""
@@ -1672,24 +1804,29 @@ class Application(tk.Tk):
                 # Calcul de l'activité à l'heure d'injection
                 activite_a_heure_injection = "N/A"
                 try:
-                    if patient and mrp and entry.get("activite_prelevee"):
+                    if mrp and entry.get("activite_prelevee"):
                         activite_prelevee = float(entry["activite_prelevee"])
-                        heure_injection = datetime.strptime(patient.get('heure', ''), "%H:%M").time()
-                        date_injection = datetime.combine(datetime.now().date(), heure_injection)
+                        patient = next((p for p in self.patients if p["nom"] == entry["patient"]), None)
+                        if not patient:
+                            patient = next((p for p in getattr(self, 'historique_patients', []) if p["nom"] == entry["patient"]), None)
                         
-                        # Calcul du delta t entre date dispensation et heure d'injection
-                        date_dispensation_str = entry.get("date", "")
-                        if date_dispensation_str and heure_injection:
-                            dt_disp = datetime.strptime(date_dispensation_str, "%Y-%m-%d %H:%M")
-                            dt_injection = datetime.combine(dt_disp.date(), heure_injection)
-                            # Si l'heure d'injection est antérieure à la dispensation, prendre le lendemain
-                            if dt_injection < dt_disp:
-                                dt_injection = dt_injection + timedelta(days=1)
-                            t_decay = (dt_injection - dt_disp).total_seconds()
-                            demi_vie = mrp.radionuclide.demi_vie
-                            lambda_rad = math.log(2) / demi_vie
-                            activite_a_heure_injection = activite_prelevee * math.exp(-lambda_rad * t_decay)
-                            activite_a_heure_injection = f"{activite_a_heure_injection:.2f}"
+                        if patient:
+                            heure_injection = datetime.strptime(patient.get('heure', ''), "%H:%M").time()
+                            date_injection = datetime.combine(datetime.now().date(), heure_injection)
+                            
+                            # Calcul du delta t entre date dispensation et heure d'injection
+                            date_dispensation_str = entry.get("date", "")
+                            if date_dispensation_str and heure_injection:
+                                dt_disp = datetime.strptime(date_dispensation_str, "%Y-%m-%d %H:%M")
+                                dt_injection = datetime.combine(dt_disp.date(), heure_injection)
+                                # Si l'heure d'injection est antérieure à la dispensation, prendre le lendemain
+                                if dt_injection < dt_disp:
+                                    dt_injection = dt_injection + timedelta(days=1)
+                                t_decay = (dt_injection - dt_disp).total_seconds()
+                                demi_vie = mrp.radionuclide.demi_vie
+                                lambda_rad = math.log(2) / demi_vie
+                                activite_a_heure_injection = activite_prelevee * math.exp(-lambda_rad * t_decay)
+                                activite_a_heure_injection = f"{activite_a_heure_injection:.2f}"
                 except Exception:
                     activite_a_heure_injection = "N/A"
                 
@@ -1704,8 +1841,7 @@ class Application(tk.Tk):
                     entry["action"],
                     activite_a_heure_injection,
                     entry["heure_expiration"],
-                    entry.get("num_seringue", ""),
-                    lot_generateur
+                    entry.get("num_seringue", "")
                 )
                 
                 for i, cell in enumerate(row):
@@ -1733,34 +1869,37 @@ class Application(tk.Tk):
             filename = f"historique_seringues_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
             data = []
             for entry in self.historique_seringues:
-                patient = next((p for p in self.patients if p["nom"] == entry["patient"]), None)
-                if not patient:
-                    patient = next((p for p in getattr(self, 'historique_patients', []) if p["nom"] == entry["patient"]), None)
-                date_naissance = patient.get("date_naissance", "") if patient else ""
-                poids = patient.get("poids", "") if patient else ""
+                # Utiliser directement les données sauvegardées dans l'historique
+                date_naissance = entry.get("date_naissance", "")
+                poids = entry.get("poids", "")
                 mrp = next((m for m in self.mrp_solutions if m.nom == entry["mrp"]), None)
                 numero_prep = getattr(mrp, 'numero_prep', "") if mrp else ""
                 lot_generateur = getattr(mrp, 'lot_generateur', "") if mrp else ""
                 activite_a_heure_injection = "N/A"
                 try:
-                    if patient and mrp and entry.get("activite_prelevee"):
+                    if mrp and entry.get("activite_prelevee"):
                         activite_prelevee = float(entry["activite_prelevee"])
-                        heure_injection = datetime.strptime(patient.get('heure', ''), "%H:%M").time()
-                        date_injection = datetime.combine(datetime.now().date(), heure_injection)
+                        patient = next((p for p in self.patients if p["nom"] == entry["patient"]), None)
+                        if not patient:
+                            patient = next((p for p in getattr(self, 'historique_patients', []) if p["nom"] == entry["patient"]), None)
                         
-                        # Calcul du delta t entre date dispensation et heure d'injection
-                        date_dispensation_str = entry.get("date", "")
-                        if date_dispensation_str and heure_injection:
-                            dt_disp = datetime.strptime(date_dispensation_str, "%Y-%m-%d %H:%M")
-                            dt_injection = datetime.combine(dt_disp.date(), heure_injection)
-                            # Si l'heure d'injection est antérieure à la dispensation, prendre le lendemain
-                            if dt_injection < dt_disp:
-                                dt_injection = dt_injection + timedelta(days=1)
-                            t_decay = (dt_injection - dt_disp).total_seconds()
-                            demi_vie = mrp.radionuclide.demi_vie
-                            lambda_rad = math.log(2) / demi_vie
-                            activite_a_heure_injection = activite_prelevee * math.exp(-lambda_rad * t_decay)
-                            activite_a_heure_injection = f"{activite_a_heure_injection:.2f}"
+                        if patient:
+                            heure_injection = datetime.strptime(patient.get('heure', ''), "%H:%M").time()
+                            date_injection = datetime.combine(datetime.now().date(), heure_injection)
+                            
+                            # Calcul du delta t entre date dispensation et heure d'injection
+                            date_dispensation_str = entry.get("date", "")
+                            if date_dispensation_str and heure_injection:
+                                dt_disp = datetime.strptime(date_dispensation_str, "%Y-%m-%d %H:%M")
+                                dt_injection = datetime.combine(dt_disp.date(), heure_injection)
+                                # Si l'heure d'injection est antérieure à la dispensation, prendre le lendemain
+                                if dt_injection < dt_disp:
+                                    dt_injection = dt_injection + timedelta(days=1)
+                                t_decay = (dt_injection - dt_disp).total_seconds()
+                                demi_vie = mrp.radionuclide.demi_vie
+                                lambda_rad = math.log(2) / demi_vie
+                                activite_a_heure_injection = activite_prelevee * math.exp(-lambda_rad * t_decay)
+                                activite_a_heure_injection = f"{activite_a_heure_injection:.2f}"
                 except Exception:
                     activite_a_heure_injection = "N/A"
                 
@@ -1774,8 +1913,7 @@ class Application(tk.Tk):
                     "Action": entry["action"],
                     "Activité à l'heure d'injection": activite_a_heure_injection,
                     "Heure d'expiration": entry["heure_expiration"],
-                    "N° Seringue": entry.get("num_seringue", ""),
-                    "Lot générateur": lot_generateur
+                    "N° Seringue": entry.get("num_seringue", "")
                 })
             df = pd.DataFrame(data)
             df.to_excel(filename, index=False)
@@ -2615,7 +2753,7 @@ class Application(tk.Tk):
             treeview.heading(col, command=lambda _col=col: treeview_sort_column(treeview, _col, False))
 
     def update_generateur_combobox(self):
-        lots = [gen["lot"] for gen in self.generators]
+        lots = ["Pas de Générateur"] + [gen["lot"] for gen in self.generators]
         self.mrp_generateur_cb['values'] = lots
         if lots:
             self.mrp_generateur_cb.current(0)
@@ -2624,11 +2762,16 @@ class Application(tk.Tk):
 
     def on_generateur_selected(self, event):
         lot_selectionne = self.mrp_generateur_cb.get()
-        generateur = next((gen for gen in self.generators if gen["lot"] == lot_selectionne), None)
-        if generateur:
-            # Pré-remplir la date d'expiration du générateur
+        if lot_selectionne == "Pas de Générateur":
+            # Pré-remplir "N/A" pour la date d'expiration du générateur
             self.mrp_entries["Date d'expiration du générateur:"].delete(0, tk.END)
-            self.mrp_entries["Date d'expiration du générateur:"].insert(0, generateur["date_peremption"].strftime("%Y-%m-%d"))
+            self.mrp_entries["Date d'expiration du générateur:"].insert(0, "N/A")
+        else:
+            generateur = next((gen for gen in self.generators if gen["lot"] == lot_selectionne), None)
+            if generateur:
+                # Pré-remplir la date d'expiration du générateur
+                self.mrp_entries["Date d'expiration du générateur:"].delete(0, tk.END)
+                self.mrp_entries["Date d'expiration du générateur:"].insert(0, generateur["date_peremption"].strftime("%Y-%m-%d"))
 
     def update_big_labels_disp(self, event=None):
         selected = self.tree_disp.selection()
@@ -2655,7 +2798,7 @@ class Application(tk.Tk):
         else:
             self.label_big_activite.config(text="— MBq", bg="#ede31b")
         if volume is not None:
-            self.label_big_volume.config(text=f"{volume:.2f} mL", bg="#e12727")
+            self.label_big_volume.config(text=f"{volume:.3f} mL", bg="#e12727")
         else:
             self.label_big_volume.config(text="— mL", bg="#e12727")
 
@@ -2682,7 +2825,7 @@ class Application(tk.Tk):
 
     def update_mrp_expired_status(self):
         selected_nom = self.disp_mrp_cb.get()
-        mrp_selected = next((m for m in self.mrp_solutions if m.nom == selected_nom), None)
+        mrp_selected = self.get_mrp_from_display_name(selected_nom)
         expired = False
         if mrp_selected:
             if mrp_selected.date_expiration < date.today():
@@ -2693,6 +2836,52 @@ class Application(tk.Tk):
         else:
             self.label_mrp_expired.config(text="", fg="red")
             self.bouton_valider.state(["!disabled"])
+
+    def get_mrp_from_display_name(self, display_name):
+        """Extrait le MRP unique à partir du nom d'affichage en utilisant le numéro de préparation"""
+        if " (N°" in display_name:
+            mrp_nom = display_name.split(" (N°")[0]
+            numero_prep = display_name.split(" (N°")[1].rstrip(")")
+            # Chercher le MRP avec le bon nom ET le bon numéro de préparation
+            mrp_selected = next((m for m in self.mrp_solutions 
+                               if m.nom == mrp_nom and getattr(m, 'numero_prep', "") == numero_prep), None)
+        else:
+            # Fallback pour les MRP sans numéro de préparation ou pour les noms simples
+            mrp_selected = next((m for m in self.mrp_solutions if m.nom == display_name), None)
+        
+        return mrp_selected
+
+    def get_simple_mrp_name(self, display_name):
+        """Extrait le nom simple du MRP depuis le nom d'affichage"""
+        if " (N°" in display_name:
+            return display_name.split(" (N°")[0]
+        else:
+            return display_name
+
+    def update_disp_mrp_combobox(self):
+        # Afficher les MRP avec leur numéro de préparation pour les distinguer
+        mrp_display_names = []
+        max_length = 0
+        for mrp in self.mrp_solutions:
+            numero_prep = getattr(mrp, 'numero_prep', "")
+            if numero_prep:
+                display_name = f"{mrp.nom} (N°{numero_prep})"
+            else:
+                display_name = mrp.nom
+            mrp_display_names.append(display_name)
+            # Calculer la longueur maximale pour ajuster la largeur de la combobox
+            max_length = max(max_length, len(display_name))
+        
+        # Ajuster la largeur de la combobox en fonction du contenu le plus long
+        # Ajouter un peu d'espace supplémentaire pour la lisibilité
+        optimal_width = min(max_length + 5, 80)  # Limiter à 80 caractères maximum
+        self.disp_mrp_cb.configure(width=optimal_width)
+        
+        self.disp_mrp_cb['values'] = mrp_display_names
+        if mrp_display_names:
+            self.disp_mrp_cb.current(0)
+        else:
+            self.disp_mrp_cb.set("")
 
 
 if __name__ == "__main__":
