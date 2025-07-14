@@ -8,6 +8,7 @@ from reportlab.lib.units import cm
 from reportlab.pdfgen import canvas
 import pandas as pd
 import platform
+import uuid
 
 DATA_FILE = "data.pkl"
 
@@ -260,13 +261,14 @@ class Application(tk.Tk):
         tree_frame = ttk.Frame(self.mrp_frame)
         tree_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
-        colonnes = ("Nom", "N° Préparation", "Lot", "Expiration", "Activité initiale", "Volume initial",
-                    "Activité actuelle", "Volume actuel", "Radionuclide", "Création", "Expiration MRP", "Lot générateur", "Expiration générateur", "MRP")
+        colonnes = ("Nom", "N° Préparation", "Lot", "Expiration", "Activité initiale (MBq)", "Volume initial (mL)",
+                    "Activité actuelle (MBq)", "Volume actuel (mL)", "Radionuclide", "Création", "Expiration MRP", "Lot générateur", "Expiration générateur", "MRP", "Etiquette")
         self.tree_mrp = ttk.Treeview(tree_frame, columns=colonnes, show="headings", height=8)
         for col in colonnes:
             self.tree_mrp.heading(col, text=col)
             self.tree_mrp.column(col, width=100)  # Set a default width for columns
         self.tree_mrp.pack(fill="both", expand=True)
+        self.tree_mrp.bind("<Double-1>", self.on_mrp_double_click)
 
     def on_banque_mrp_selected(self, event):
         sel = self.mrp_banque_cb.get()
@@ -357,7 +359,10 @@ class Application(tk.Tk):
             self.mrp_radionuclide_cb.set("")
 
     def update_mrp_tree(self):
-        self.preserve_treeview_selection(self.tree_mrp, self._update_mrp_tree, key_column=0)  # Nom
+        # Utiliser une clé unique (nom + numéro de préparation) pour la sélection
+        def key_func(values):
+            return f"{values[0]}||{values[1]}"  # Nom||N° Préparation
+        self.preserve_treeview_selection(self.tree_mrp, self._update_mrp_tree, key_func=key_func)
     def _update_mrp_tree(self):
         for i in self.tree_mrp.get_children():
             self.tree_mrp.delete(i)
@@ -386,7 +391,8 @@ class Application(tk.Tk):
                 expiration_mrp,
                 lot_generateur,
                 date_exp_generateur_str,
-                mrp_value
+                mrp_value,
+                "Imprimer"  # Toujours afficher "Imprimer" dans la colonne Etiquette
             )
             self.tree_mrp.insert("", tk.END, values=item)
         self.save_data()
@@ -815,8 +821,15 @@ class Application(tk.Tk):
 
         bouton_actualiser = ttk.Button(form_frame, text="Actualiser", command=self.update_patients_tree)
         bouton_actualiser.grid(row=7, column=0, columnspan=2, pady=5)
-        bouton_ajouter_patient = ttk.Button(form_frame, text="Ajouter Patient", command=self.ajouter_patient)
-        bouton_ajouter_patient.grid(row=8, column=0, columnspan=2, pady=10)
+        # Regroupement ergonomique des boutons d'action
+        action_frame = ttk.Frame(form_frame)
+        action_frame.grid(row=9, column=0, columnspan=2, pady=10)
+        bouton_ajouter_patient = ttk.Button(action_frame, text="Ajouter Patient", command=self.ajouter_patient)
+        bouton_ajouter_patient.pack(side="left", padx=5)
+        bouton_modifier_patient = ttk.Button(action_frame, text="Modifier Patient", command=self.modifier_patient)
+        bouton_modifier_patient.pack(side="left", padx=5)
+        bouton_supprimer_patient = ttk.Button(action_frame, text="Supprimer Patient", command=self.supprimer_patient)
+        bouton_supprimer_patient.pack(side="left", padx=5)
 
         # Treeview en dessous du formulaire
         self.tree_patients = ttk.Treeview(self.patient_frame,
@@ -825,10 +838,8 @@ class Application(tk.Tk):
         for col in ("Nom", "MRP prescrit", "Heure d'injection", "Activité prescrite", "Poids", "Date de naissance"):
             self.tree_patients.heading(col, text=col)
         self.tree_patients.pack(fill="both", expand=True, padx=5, pady=5)
-
-        bouton_supprimer_patient = ttk.Button(self.patient_frame, text="Supprimer Patient",
-                                            command=self.supprimer_patient)
-        bouton_supprimer_patient.pack(pady=5)
+        # Ajout : rendre le tableau triable
+        self.make_treeview_sortable(self.tree_patients)
 
     def update_patient_mrp_combobox(self):
         # Récupérer toutes les classes MRP uniques de la banque de MRP
@@ -853,6 +864,17 @@ class Application(tk.Tk):
         for i in self.tree_patients.get_children():
             self.tree_patients.delete(i)
         for patient in self.patients:
+            # Vérifier si la dernière seringue de ce patient est validée
+            nom_patient = patient["nom"]
+            # Chercher la dernière entrée d'historique pour ce patient
+            histo = [h for h in self.historique_seringues if h["patient"] == nom_patient]
+            is_valid = False
+            if histo:
+                # Prendre la dernière entrée (par date)
+                last = max(histo, key=lambda h: h["date"])
+                if last.get("action", "") == "Validé":
+                    is_valid = True
+            tag = "valid" if is_valid else "notvalid"
             self.tree_patients.insert("", tk.END, values=(
                 patient["nom"],
                 patient["mrp_prescrit"],
@@ -860,7 +882,10 @@ class Application(tk.Tk):
                 patient["activite"],
                 patient.get("poids", ""),
                 patient.get("date_naissance", "")
-            ))
+            ), tags=(tag,))
+        # Appliquer la couleur verte pour les patients validés
+        self.tree_patients.tag_configure("valid", background="#00CC66")
+        self.tree_patients.tag_configure("notvalid", background="")
         self.save_data()
 
     def ajouter_patient(self):
@@ -918,11 +943,76 @@ class Application(tk.Tk):
         self.update_patients_tree()
         self.save_data()
 
+    def modifier_patient(self):
+        selected = self.tree_patients.selection()
+        if not selected:
+            messagebox.showerror("Erreur", "Sélectionnez un patient à modifier.")
+            return
+        item = self.tree_patients.item(selected[0], "values")
+        nom = item[0]
+        patient = next((p for p in self.patients if p["nom"] == nom), None)
+        if not patient:
+            messagebox.showerror("Erreur", "Patient non trouvé.")
+            return
+        # Fenêtre de modification
+        win = tk.Toplevel(self)
+        win.title(f"Modifier patient : {nom}")
+        win.grab_set()
+        labels = [
+            ("Nom du patient:", patient["nom"]),
+            ("Heure d'injection (HH:MM):", patient["heure"]),
+            ("Activité prescrite (MBq):", str(patient["activite"])),
+            ("Poids du patient (kg):", str(patient.get("poids", ""))),
+            ("Date de naissance (YYYY-MM-DD):", patient.get("date_naissance", "")),
+            ("MRP prescrit:", patient.get("mrp_prescrit", "")),
+        ]
+        entries = {}
+        for i, (lbl, val) in enumerate(labels):
+            tk.Label(win, text=lbl).grid(row=i, column=0, padx=5, pady=5, sticky="w")
+            e = tk.Entry(win)
+            e.grid(row=i, column=1, padx=5, pady=5)
+            e.insert(0, val)
+            entries[lbl] = e
+        # MRP prescrit : remplacer par une combobox
+        mrp_classes = set()
+        for item in self.banque_mrp:
+            mrp_value = item.get("mrp", "")
+            if mrp_value:
+                mrp_classes.add(mrp_value)
+        mrp_values = sorted(list(mrp_classes))
+        cb_mrp = ttk.Combobox(win, values=mrp_values, state="readonly")
+        cb_mrp.grid(row=5, column=1, padx=5, pady=5)
+        cb_mrp.set(patient.get("mrp_prescrit", ""))
+        entries["MRP prescrit:"] = cb_mrp
+        # Bouton enregistrer
+        def enregistrer():
+            try:
+                patient["nom"] = entries["Nom du patient:"].get()
+                patient["heure"] = entries["Heure d'injection (HH:MM):"].get()
+                patient["activite"] = float(entries["Activité prescrite (MBq):"].get())
+                poids_str = entries["Poids du patient (kg):"].get()
+                patient["poids"] = float(poids_str) if poids_str else None
+                patient["date_naissance"] = entries["Date de naissance (YYYY-MM-DD):"].get()
+                patient["mrp_prescrit"] = entries["MRP prescrit:"].get()
+                self.update_patients_tree()
+                self.save_data()
+                win.destroy()
+            except Exception as e:
+                messagebox.showerror("Erreur", f"Erreur lors de la modification : {e}")
+        bouton_enregistrer = ttk.Button(win, text="Enregistrer", command=enregistrer)
+        bouton_enregistrer.grid(row=len(labels), column=0, columnspan=2, pady=10)
+
     # --- Dispensation Tab ---
 
     def create_dispensation_tab(self):
         self.disp_frame = ttk.Frame(self.notebook)
         self.notebook.add(self.disp_frame, text="Dispensation de Seringues")
+
+        # Création immédiate du label d'activité insuffisante (avant tout le reste)
+        self.label_activite_insuffisante = tk.Label(self.disp_frame, text="", font=("Segoe UI", 16, "bold"), fg="red")
+        self.label_activite_insuffisante.pack(fill="x", padx=5, pady=(0, 5))
+        self._clignotement_alerte_bloque = False
+        self.label_activite_insuffisante.bind("<Button-1>", self._stop_blink_activite_insuffisante)
 
         # Create a frame for the form
         form_frame = ttk.Frame(self.disp_frame)
@@ -950,6 +1040,9 @@ class Application(tk.Tk):
 
         self.label_mrp_info = ttk.Label(info_col1, text="Informations MRP: N/A", justify="left")
         self.label_mrp_info.pack(fill="x", padx=5, pady=5)
+        # Nouveau : label séparé pour Expiration MRP
+        self.label_expiration_mrp = tk.Label(info_col1, text="", font=("Segoe UI", 12, "bold"))
+        self.label_expiration_mrp.pack(fill="x", padx=5, pady=(0, 5))
 
         # Colonne 2: Valeurs importantes (gras, taille 16)
         info_col2 = ttk.Frame(info_frame)
@@ -973,7 +1066,12 @@ class Application(tk.Tk):
         self.label_big_activite_text = ttk.Label(big_label_frame, text="Activité à prélever :", font=("Segoe UI", 30, "bold"))
         self.label_big_activite_text.pack(side="left", padx=(20,0))
         self.label_big_activite = tk.Label(big_label_frame, text="— MBq", font=("Segoe UI", 30, "bold"), fg="#222", bg="#ede31b", bd=2, relief="ridge", padx=16, pady=2)
-        self.label_big_activite.pack(side="left", padx=(5, 40))
+        self.label_big_activite.pack(side="left", padx=(5, 10))
+        # Ajout : labels -10% et +10% à côté du rectangle jaune
+        self.label_activite_moins10 = tk.Label(big_label_frame, text="-10% : — MBq", font=("Segoe UI", 16, "bold"), fg="#fff", bg="#7EC1FE", padx=8, pady=2, bd=2, relief="ridge")
+        self.label_activite_moins10.pack(side="left", padx=(0, 5))
+        self.label_activite_plus10 = tk.Label(big_label_frame, text="+10% : — MBq", font=("Segoe UI", 16, "bold"), fg="#fff", bg="#1616A6", padx=8, pady=2, bd=2, relief="ridge")
+        self.label_activite_plus10.pack(side="left", padx=(0, 40))
         # Label volume à prélever (highlight rouge)
         self.label_big_volume_text = ttk.Label(big_label_frame, text="Volume à prélever :", font=("Segoe UI", 30, "bold"))
         self.label_big_volume_text.pack(side="left", padx=(20,0))
@@ -985,7 +1083,8 @@ class Application(tk.Tk):
         tree_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
         colonnes = ("Patient", "Date de naissance", "Heure d'injection", "Activité prescrite", "Volume à prélever",
-                   "Activité à prélever", "Activité prélevée", "Volume prélevé", "Activité à l'heure d'injection", "Date dispensation", "Heure d'expiration", "N° Seringue", "N° Préparation", "Expiration MRP", "Etiquette")
+                   "Activité à prélever", "Activité prélevée", "Volume prélevé", "Activité à l'heure d'injection", 
+                   "Ecart", "Date dispensation", "Heure d'expiration", "N° Seringue", "N° Préparation", "Expiration MRP", "Etiquette")
         self.tree_disp = ttk.Treeview(tree_frame, columns=colonnes, show="headings", height=6)
         for col in colonnes:
             self.tree_disp.heading(col, text=col)
@@ -994,6 +1093,7 @@ class Application(tk.Tk):
         # Cacher les colonnes "Volume à prélever" et "Activité à prélever"
         self.tree_disp.column("Volume à prélever", width=0, stretch=False)
         self.tree_disp.column("Activité à prélever", width=0, stretch=False)
+        self.tree_disp.column("Ecart", width=80, stretch=False)
         self.tree_disp.pack(fill="both", expand=True)
         self.tree_disp.tag_configure("valid", background="#00CC66")
         self.tree_disp.tag_configure("notvalid", background="#FF9933")
@@ -1060,24 +1160,29 @@ class Application(tk.Tk):
         patients_filtered = [p for p in self.patients if p["mrp_prescrit"] == mrp_class]
         total_activite_prelevee = 0.0
         total_volume_preleve = 0.0
+        activite_insuffisante = False  # Flag pour l'alerte
+        non_valides_blocked = []  # Liste pour la logique stricte
         for idx, patient in enumerate(patients_filtered):
             try:
                 heure_injection = datetime.strptime(patient["heure"], "%H:%M").time()
                 date_injection = datetime.combine(datetime.now().date(), heure_injection)
-                t_injection = (date_injection - mrp_selected.creation_time).total_seconds()
-                activite_injection = mrp_selected.activite_initiale * math.exp(-lambda_ * t_injection)
-                effective_activity_injection = max(0, activite_injection - total_activite_prelevee)
-                volume_restant_injection = max(0, mrp_selected.volume - total_volume_preleve)
-                volume_restant_injection = min(volume_restant_injection, mrp_selected.volume)  # Ne pas dépasser le volume initial
-                activite_volumique_injection = effective_activity_injection / volume_restant_injection if volume_restant_injection > 0 else 0
-                volume_a_prelever = patient["activite"] / activite_volumique_injection if activite_volumique_injection > 0 else 0
+                # Décroissance radioactive : calcul du delta t entre maintenant (prélèvement) et l'heure d'injection
                 delta_t = (date_injection - datetime.now()).total_seconds()
                 lambda_rad = math.log(2) / mrp_selected.radionuclide.demi_vie
-                activite_a_prelever = activite_volumique * volume_a_prelever
+                # Calcul de l'activité à prélever pour obtenir l'activité prescrite à l'heure d'injection
+                activite_a_prelever = patient["activite"] / math.exp(-lambda_rad * delta_t)
+                # Toujours >= activité prescrite
+                activite_a_prelever = max(activite_a_prelever, patient["activite"])
+                # Calcul du volume à prélever en fonction de l'activité volumique actuelle
+                activite_volumique_injection = activite_volumique
+                volume_a_prelever = activite_a_prelever / activite_volumique_injection if activite_volumique_injection > 0 else 0
             except ValueError:
                 volume_a_prelever = patient["activite"] / activite_volumique if activite_volumique > 0 else 0
                 activite_volumique_injection = activite_volumique
                 activite_a_prelever = patient["activite"]
+            # Logique stricte : stocke pour chaque patient non validé
+            if not patient.get("valide"):
+                non_valides_blocked.append(activite_a_prelever > effective_activity)
             patient['activite_a_prelever'] = activite_a_prelever  # Stockage pour validation
             activite_prelevee = patient.get("activite_prelevee", "")
             heure_exp = patient.get("heure_expiration", "")
@@ -1115,6 +1220,16 @@ class Application(tk.Tk):
                 except Exception:
                     activite_a_heure_injection = ""
                     volume_preleve_affiche = ""
+            # Calcul de l'écart en pourcentage entre activité à l'heure d'injection et activité prescrite
+            try:
+                activite_prescrite = float(patient["activite"])
+                if activite_a_heure_injection:
+                    ecart = (float(activite_a_heure_injection) - activite_prescrite) / activite_prescrite * 100
+                    ecart_str = f"{ecart:+.1f}%"
+                else:
+                    ecart_str = ""
+            except Exception:
+                ecart_str = ""
             item = (
                 patient["nom"],
                 patient.get('date_naissance', 'N/A'),
@@ -1125,6 +1240,7 @@ class Application(tk.Tk):
                 activite_prelevee,
                 volume_preleve_affiche,
                 activite_a_heure_injection,
+                ecart_str,
                 date_dispensation,
                 heure_exp,
                 num_seringue,
@@ -1154,10 +1270,33 @@ class Application(tk.Tk):
                     self.tree_disp.see(iid)
                     break
         self.update_big_labels_disp()
+        # Affichage du message d'alerte si besoin
+        if hasattr(self, 'label_activite_insuffisante'):
+            if non_valides_blocked and all(non_valides_blocked):
+                self.label_activite_insuffisante.config(text="Activité insuffisante dans le flacon")
+                # Ne relance le clignotement que si l'alerte vient d'apparaître ou a été acquittée
+                if not getattr(self, '_activite_insuffisante_active', False) or self._blink_activite_insuffisante_id is None:
+                    self._blink_activite_insuffisante_id = str(uuid.uuid4())
+                    self._clignotement_alerte_bloque = False
+                    self._activite_insuffisante_active = True
+                    self._blink_activite_insuffisante(True, self._blink_activite_insuffisante_id)
+                else:
+                    self._activite_insuffisante_active = True
+            else:
+                self._activite_insuffisante_active = False
+                self._blink_activite_insuffisante_id = None
+                self.label_activite_insuffisante.config(text="", fg="red", bg="SystemButtonFace")
+                self._clignotement_alerte_bloque = False
 
     def update_activity_display(self):
         selected_nom = self.disp_mrp_cb.get()
         mrp_selected = self.get_mrp_from_display_name(selected_nom)
+        # Stocker l'identifiant du MRP courant pour le clignotement
+        if mrp_selected:
+            mrp_id = f"{mrp_selected.nom}||{getattr(mrp_selected, 'numero_prep', '')}"
+            self._mrp_blink_id = mrp_id
+        else:
+            self._mrp_blink_id = None
         if mrp_selected:
             # Calcul de l'activité actuelle avec décroissance
             t = (datetime.now() - mrp_selected.creation_time).total_seconds()
@@ -1172,21 +1311,70 @@ class Application(tk.Tk):
             self.label_current_activity.config(text=f"Activité: {effective_activity:.2f} MBq")
             self.label_activite_volumique.config(text=f"Activité volumique: {activite_volumique:.2f} MBq/mL")
             self.label_volume_restant.config(text=f"Volume restant: {volume_restant:.3f} mL")
-            info = (f"Nom: {mrp_selected.nom}\n"
-                    f"Lot: {mrp_selected.lot}\n"
-                    f"Expiration: {mrp_selected.date_expiration.strftime('%Y-%m-%d')}\n"
-                    f"Activité initiale: {mrp_selected.activite_initiale:.2f} MBq\n"
-                    f"Volume initial: {mrp_selected.volume:.3f} mL\n"
-                    f"Radionuclide: {mrp_selected.radionuclide.nom}\n"
-                    f"Heure de création: {mrp_selected.creation_time.strftime('%H:%M')}")
+            info = (f"Nom : {mrp_selected.nom}\n"
+                    f"Lot de trousse : {mrp_selected.lot}\n"
+                    f"Expiration trousse : {mrp_selected.date_expiration.strftime('%Y-%m-%d')}\n"
+                    f"Activité initiale : {mrp_selected.activite_initiale:.2f} MBq\n"
+                    f"Volume initial : {mrp_selected.volume:.3f} mL\n"
+                    f"Radionucléide : {mrp_selected.radionuclide.nom}\n"
+                    f"Date de création : {mrp_selected.creation_time.strftime('%Y-%m-%d à %H:%M')}")
             self.label_mrp_info.config(text="Informations MRP:\n" + info)
+            # --- Expiration MRP ---
+            expiration_mrp_dt = getattr(mrp_selected, 'expiration_mrp', None)
+            if expiration_mrp_dt:
+                expiration_str = expiration_mrp_dt.strftime('%Y-%m-%d %H:%M')
+                now = datetime.now()
+                if now > expiration_mrp_dt:
+                    # Clignotement rouge
+                    self._blink_expiration_mrp(f"Expiration MRP : {expiration_str}", True, self._mrp_blink_id)
+                else:
+                    self.label_expiration_mrp.config(text=f"Expiration MRP : {expiration_str}", fg="black", bg="SystemButtonFace")
+            else:
+                self.label_expiration_mrp.config(text="Expiration MRP : N/A", fg="black", bg="SystemButtonFace")
         else:
             self.label_current_activity.config(text="Activité: N/A")
             self.label_activite_volumique.config(text="Activité volumique: N/A")
             self.label_volume_restant.config(text="Volume restant: N/A")
             self.label_mrp_info.config(text="Informations MRP: N/A")
+            self.label_expiration_mrp.config(text="Expiration MRP : N/A", fg="black", bg="SystemButtonFace")
         self.after(1000, self.update_activity_display)
         self.update_mrp_expired_status()  # Vérifier l'expiration à chaque update
+
+    def _blink_expiration_mrp(self, text, blink_on=True, mrp_id=None):
+        # Clignotement rouge/blanc, ne continue que si le MRP affiché est toujours le même
+        if not hasattr(self, '_mrp_blink_id') or mrp_id != self._mrp_blink_id:
+            # Arrêter le clignotement si on a changé de MRP
+            self.label_expiration_mrp.config(text=text, fg="red", bg="SystemButtonFace")
+            return
+        if blink_on:
+            self.label_expiration_mrp.config(text=text, fg="white", bg="red")
+            self.label_expiration_mrp.after(500, lambda: self._blink_expiration_mrp(text, False, mrp_id))
+        else:
+            self.label_expiration_mrp.config(text=text, fg="red", bg="SystemButtonFace")
+            self.label_expiration_mrp.after(500, lambda: self._blink_expiration_mrp(text, True, mrp_id))
+
+    def _blink_activite_insuffisante(self, blink_on=True, blink_id=None):
+        # Clignotement pour l'alerte activité insuffisante, persiste tant que l'utilisateur n'a pas cliqué
+        if not getattr(self, '_activite_insuffisante_active', False):
+            self.label_activite_insuffisante.config(fg="red", bg="SystemButtonFace")
+            return
+        if blink_id is not None and blink_id != getattr(self, '_blink_activite_insuffisante_id', None):
+            self.label_activite_insuffisante.config(fg="red", bg="SystemButtonFace")
+            return
+        if self._clignotement_alerte_bloque:
+            self.label_activite_insuffisante.config(fg="red", bg="SystemButtonFace")
+            return
+        if blink_on:
+            self.label_activite_insuffisante.config(fg="white", bg="red")
+            self.label_activite_insuffisante.after(500, lambda: self._blink_activite_insuffisante(False, blink_id))
+        else:
+            self.label_activite_insuffisante.config(fg="red", bg="SystemButtonFace")
+            self.label_activite_insuffisante.after(500, lambda: self._blink_activite_insuffisante(True, blink_id))
+
+    def _stop_blink_activite_insuffisante(self, event=None):
+        self._clignotement_alerte_bloque = True
+        self.label_activite_insuffisante.config(fg="red", bg="SystemButtonFace")
+        self._blink_activite_insuffisante_id = None
 
     def valider_prelèvement(self):
         selected_item = self.tree_disp.selection()
@@ -1236,8 +1424,13 @@ class Application(tk.Tk):
             messagebox.showerror("Erreur", "L'activité prélevée diffère de plus de ±10% par rapport à l'activité à prélever.")
             return
         syringe_time = datetime.now()
-        mrp_expiration_dt = datetime.combine(mrp_selected.date_expiration, time(23, 59, 59))
-        heure_expiration = min(syringe_time + timedelta(minutes=30), mrp_expiration_dt)
+        # Prendre la vraie expiration du MRP (champ expiration_mrp, un datetime)
+        mrp_expiration_dt = getattr(mrp_selected, 'expiration_mrp', None)
+        if not mrp_expiration_dt:
+            # Fallback : date d'expiration à 23:59:59
+            mrp_expiration_dt = datetime.combine(mrp_selected.date_expiration, time(23, 59, 59))
+        expiration_30min = syringe_time + timedelta(minutes=30)
+        heure_expiration = expiration_30min if expiration_30min < mrp_expiration_dt else mrp_expiration_dt
         # Mise à jour du MRP avec vérifications
         nouveau_volume = mrp_selected.volume_restant - volume_prelever
         if nouveau_volume < 0:
@@ -1367,7 +1560,7 @@ class Application(tk.Tk):
 
     def on_disp_double_click(self, event):
         region = self.tree_disp.identify("region", event.x, event.y)
-        if region != "cell" or self.tree_disp.identify_column(event.x) != "#15":  # Colonne "Imprimer"
+        if region != "cell" or self.tree_disp.identify_column(event.x) != "#16":  # Colonne "Imprimer"
             return
         item = self.tree_disp.focus()
         if not item:
@@ -1399,20 +1592,20 @@ class Application(tk.Tk):
         # Marges
         marge_gauche = 6
         marge_haut = 6
-        espace_ligne = 13
+        espace_ligne = 15  # Augmenté pour occuper plus d'espace
         decalage_bas = 4 * 2.8346  # 4 mm en points
         y = hauteur_defaut_pts - marge_haut - decalage_bas
 
         # Titre principal (nom du MRP)
-        c.setFont("Helvetica-Bold", 13)
+        c.setFont("Helvetica-Bold", 15)  # Plus grand
         c.drawString(marge_gauche, y, f"{mrp.nom}")
-        y -= espace_ligne
+        y -= espace_ligne + 2
 
         # Infos principales
-        c.setFont("Helvetica-Bold", 11)
+        c.setFont("Helvetica-Bold", 12)
         c.drawString(marge_gauche, y, f"Patient : {patient['nom']}")
         y -= espace_ligne
-        c.setFont("Helvetica", 10)
+        c.setFont("Helvetica", 11)
         c.drawString(marge_gauche, y, f"N° Seringue : {patient.get('num_seringue', '')}")
         y -= espace_ligne
         activite_a_heure_injection = "N/A"
@@ -1433,11 +1626,12 @@ class Application(tk.Tk):
         y -= espace_ligne
         c.drawString(marge_gauche, y, f"Expiration seringue à : {patient.get('heure_expiration', 'N/A')}")
         y -= espace_ligne
-        c.drawString(marge_gauche, y, f"N° Préparation : {getattr(mrp, 'numero_prep', 'N/A')}")
-        y -= espace_ligne
+        # Suppression du N° Préparation
+        # c.drawString(marge_gauche, y, f"N° Préparation : {getattr(mrp, 'numero_prep', 'N/A')}")
+        # y -= espace_ligne
 
         # Image de radiation en bas à droite
-        image_path = r"C:\radioactif.png"
+        image_path = r"C:\\radioactif.png"
         try:
             img_size = 50  # en points, pour ne pas empiéter
             c.drawImage(image_path, largeur_defaut_pts - img_size - 4, 4, width=img_size, height=img_size, preserveAspectRatio=True, mask='auto')
@@ -1470,23 +1664,22 @@ class Application(tk.Tk):
                 # Ajuster les marges et espacements
                 marge_gauche_perso = 6 * scale
                 marge_haut_perso = 6 * scale
-                espace_ligne_perso = 13 * scale
+                espace_ligne_perso = 15 * scale  # Augmenté
                 decalage_bas_perso = 4 * 2.8346 * scale
                 y_perso = hauteur_perso_pts - marge_haut_perso - decalage_bas_perso
                 
                 # Titre principal
-                c_perso.setFont("Helvetica-Bold", 13 * scale)
+                c_perso.setFont("Helvetica-Bold", 15 * scale)
                 c_perso.drawString(marge_gauche_perso, y_perso, f"{mrp.nom}")
-                y_perso -= espace_ligne_perso
+                y_perso -= espace_ligne_perso + 2 * scale
                 
                 # Infos principales
-                c_perso.setFont("Helvetica-Bold", 11 * scale)
+                c_perso.setFont("Helvetica-Bold", 12 * scale)
                 c_perso.drawString(marge_gauche_perso, y_perso, f"Patient : {patient['nom']}")
                 y_perso -= espace_ligne_perso
-                c_perso.setFont("Helvetica", 10 * scale)
+                c_perso.setFont("Helvetica", 11 * scale)
                 c_perso.drawString(marge_gauche_perso, y_perso, f"N° Seringue : {patient.get('num_seringue', '')}")
                 y_perso -= espace_ligne_perso
-                
                 # Calcul de l'activité à l'heure d'injection
                 activite_a_heure_injection = "N/A"
                 try:
@@ -1500,15 +1693,15 @@ class Application(tk.Tk):
                     activite_a_heure_injection = f"{activite_a_heure_injection:.2f} MBq"
                 except Exception:
                     pass
-                
                 c_perso.drawString(marge_gauche_perso, y_perso, f"Date de naissance : {patient.get('date_naissance', 'N/A')}")
                 y_perso -= espace_ligne_perso
                 c_perso.drawString(marge_gauche_perso, y_perso, f"Activité : {activite_a_heure_injection} à {patient.get('heure', 'N/A')}")
                 y_perso -= espace_ligne_perso
                 c_perso.drawString(marge_gauche_perso, y_perso, f"Expiration seringue à : {patient.get('heure_expiration', 'N/A')}")
                 y_perso -= espace_ligne_perso
-                c_perso.drawString(marge_gauche_perso, y_perso, f"N° Préparation : {getattr(mrp, 'numero_prep', 'N/A')}")
-                y_perso -= espace_ligne_perso
+                # Suppression du N° Préparation
+                # c_perso.drawString(marge_gauche_perso, y_perso, f"N° Préparation : {getattr(mrp, 'numero_prep', 'N/A')}")
+                # y_perso -= espace_ligne_perso
                 
                 # Image de radiation
                 try:
@@ -1638,6 +1831,7 @@ class Application(tk.Tk):
         tree_frame.grid_columnconfigure(0, weight=1)
 
         self.update_historique_tree()
+        self.make_treeview_sortable(self.tree_histo)
 
     def filtrer_historique(self):
         date_filtre = self.histo_date_entry.get().strip()
@@ -1681,32 +1875,33 @@ class Application(tk.Tk):
         for i in self.tree_histo.get_children():
             self.tree_histo.delete(i)
         for entry in self.historique_seringues:
-            date_naissance = entry.get("date_naissance", "")
-            poids = entry.get("poids", "")
-            numero_prep = entry.get("numero_prep", "")
-            heure_injection = entry.get("heure_injection", "")
-            activite_a_heure_injection = "N/A"
-            try:
-                if entry.get("activite_prelevee") and heure_injection:
-                    activite_prelevee = float(entry["activite_prelevee"])
-                    date_dispensation_str = entry.get("date", "")
-                    if date_dispensation_str:
-                        dt_disp = datetime.strptime(date_dispensation_str, "%Y-%m-%d %H:%M")
-                        heure_inj = datetime.strptime(heure_injection, "%H:%M").time()
-                        dt_injection = datetime.combine(dt_disp.date(), heure_inj)
-                        if dt_injection < dt_disp:
-                            dt_injection = dt_injection + timedelta(days=1)
-                        mrp = next((m for m in self.mrp_solutions if m.nom == entry["mrp"]), None)
-                        demi_vie = mrp.radionuclide.demi_vie if mrp else 21600
-                        lambda_rad = math.log(2) / demi_vie
-                        t_decay = (dt_injection - dt_disp).total_seconds()
-                        activite_a_heure_injection = activite_prelevee * math.exp(-lambda_rad * t_decay)
-                        activite_a_heure_injection = f"{activite_a_heure_injection:.2f}"
-            except Exception:
-                activite_a_heure_injection = "N/A"
-            values = (entry["date"], entry["patient"], poids, date_naissance, entry["mrp"], numero_prep, entry["action"],
-                     activite_a_heure_injection, entry["heure_expiration"], entry.get("num_seringue", ""))
-            self.tree_histo.insert("", tk.END, values=values)
+             date_naissance = entry.get("date_naissance", "")
+             poids = entry.get("poids", "")
+             numero_prep = entry.get("numero_prep", "")
+             heure_injection = entry.get("heure_injection", "")
+             activite_a_heure_injection = "N/A"
+             try:
+                 if entry.get("activite_prelevee") and heure_injection:
+                     activite_prelevee = float(entry["activite_prelevee"])
+                     date_dispensation_str = entry.get("date", "")
+                     if date_dispensation_str:
+                         dt_disp = datetime.strptime(date_dispensation_str, "%Y-%m-%d %H:%M")
+                         heure_inj = datetime.strptime(heure_injection, "%H:%M").time()
+                         dt_injection = datetime.combine(dt_disp.date(), heure_inj)
+                         if dt_injection < dt_disp:
+                             dt_injection = dt_injection + timedelta(days=1)
+                         mrp = next((m for m in self.mrp_solutions if m.nom == entry["mrp"]), None)
+                         demi_vie = mrp.radionuclide.demi_vie if mrp else 21600
+                         lambda_rad = math.log(2) / demi_vie
+                         t_decay = (dt_injection - dt_disp).total_seconds()
+                         activite_a_heure_injection = activite_prelevee * math.exp(-lambda_rad * t_decay)
+                         activite_a_heure_injection = f"{activite_a_heure_injection:.2f}"
+             except Exception:
+                 activite_a_heure_injection = "N/A"
+             values = (entry["date"], entry["patient"], poids, date_naissance, entry["mrp"], numero_prep, entry["action"],
+                      activite_a_heure_injection, entry["heure_expiration"], entry.get("num_seringue", ""))
+             self.tree_histo.insert("", tk.END, values=values)
+        self.apply_zebra_stripes(self.tree_histo)
         self.save_data()
 
     def export_history_pdf(self):
@@ -2206,10 +2401,10 @@ class Application(tk.Tk):
         reorder_frame.grid_columnconfigure(0, weight=1)
         reorder_frame.grid_columnconfigure(1, weight=1)
         
-        bouton_reorder_up = ttk.Button(reorder_frame, text="Monter", command=self.move_tab_up)
+        bouton_reorder_up = ttk.Button(reorder_frame, text="Gauche", command=self.move_tab_up)
         bouton_reorder_up.grid(row=0, column=0, padx=(0,2), pady=2, sticky="ew")
         
-        bouton_reorder_down = ttk.Button(reorder_frame, text="Descendre", command=self.move_tab_down)
+        bouton_reorder_down = ttk.Button(reorder_frame, text="Droite", command=self.move_tab_down)
         bouton_reorder_down.grid(row=0, column=1, padx=(2,0), pady=2, sticky="ew")
 
         # Section 3: Taille d'étiquette (pleine largeur)
@@ -2377,6 +2572,7 @@ class Application(tk.Tk):
         tree_frame.grid_columnconfigure(0, weight=1)
         
         self.update_historique_mrp_tree()
+        self.make_treeview_sortable(self.tree_histo_mrp)
 
     def filtrer_historique_mrp(self):
         date_filtre = self.histo_mrp_date_entry.get().strip()
@@ -2386,7 +2582,7 @@ class Application(tk.Tk):
         filtered = [mrp for mrp in self.historique_mrp if mrp["creation_time"].strftime("%Y-%m-%d") == date_filtre]
         for i in self.tree_histo_mrp.get_children():
             self.tree_histo_mrp.delete(i)
-        for mrp in filtered:
+        for idx, mrp in enumerate(filtered):
             creation_str = mrp["creation_time"].strftime("%Y-%m-%d %H:%M")
             expiration_mrp = mrp.get('expiration_mrp', None)
             expiration_mrp_str = expiration_mrp.strftime("%Y-%m-%d %H:%M") if expiration_mrp else ""
@@ -2395,7 +2591,9 @@ class Application(tk.Tk):
             values = (mrp["nom"], numero_prep, mrp["lot"], mrp["date_expiration"].strftime("%Y-%m-%d"),
                       f"{mrp['activite_initiale']:.2f}", f"{mrp['volume']:.2f}",
                       mrp["radionuclide"], creation_str, expiration_mrp_str, lot_generateur)
-            self.tree_histo_mrp.insert("", tk.END, values=values)
+            tag = "zebra" if idx % 2 == 1 else ""
+            self.tree_histo_mrp.insert("", tk.END, values=values, tags=(tag,))
+        self.apply_zebra_stripes(self.tree_histo_mrp)
 
     def export_historique_mrp_pdf(self):
         try:
@@ -2550,15 +2748,16 @@ class Application(tk.Tk):
         for i in self.tree_histo_mrp.get_children():
             self.tree_histo_mrp.delete(i)
         for mrp in self.historique_mrp:
-            creation_str = mrp["creation_time"].strftime("%Y-%m-%d %H:%M")
-            expiration_mrp = mrp.get('expiration_mrp', None)
-            expiration_mrp_str = expiration_mrp.strftime("%Y-%m-%d %H:%M") if expiration_mrp else ""
-            numero_prep = mrp.get('numero_prep', "")
-            lot_generateur = mrp.get('lot_generateur', "")
-            values = (mrp["nom"], numero_prep, mrp["lot"], mrp["date_expiration"].strftime("%Y-%m-%d"),
-                      f"{mrp['activite_initiale']:.2f}", f"{mrp['volume']:.2f}",
-                      mrp["radionuclide"], creation_str, expiration_mrp_str, lot_generateur)
-            self.tree_histo_mrp.insert("", tk.END, values=values)
+             creation_str = mrp["creation_time"].strftime("%Y-%m-%d %H:%M")
+             expiration_mrp = mrp.get('expiration_mrp', None)
+             expiration_mrp_str = expiration_mrp.strftime("%Y-%m-%d %H:%M") if expiration_mrp else ""
+             numero_prep = mrp.get('numero_prep', "")
+             lot_generateur = mrp.get('lot_generateur', "")
+             values = (mrp["nom"], numero_prep, mrp["lot"], mrp["date_expiration"].strftime("%Y-%m-%d"),
+                       f"{mrp['activite_initiale']:.2f}", f"{mrp['volume']:.2f}",
+                       mrp["radionuclide"], creation_str, expiration_mrp_str, lot_generateur)
+             self.tree_histo_mrp.insert("", tk.END, values=values)
+        self.apply_zebra_stripes(self.tree_histo_mrp)
 
     def save_tab_order(self):
         try:
@@ -2581,8 +2780,26 @@ class Application(tk.Tk):
         self.decay_calc_frame = ttk.Frame(self.notebook)
         self.notebook.add(self.decay_calc_frame, text="Calculatrice de décroissance")
 
-        # Focus automatique sur le premier champ
-        self.decay_calc_frame.bind("<Visibility>", lambda e: self.decay_radionuclide_cb.focus_set())
+        # Préremplissage automatique à l'ouverture de l'onglet
+        def prefill_decay_fields(event=None):
+            now = datetime.now()
+            date_str = now.strftime("%Y-%m-%d")
+            heure_str = now.strftime("%H:%M")
+            self.decay_date_entry.delete(0, tk.END)
+            self.decay_date_entry.insert(0, date_str)
+            self.decay_heure_entry.delete(0, tk.END)
+            self.decay_heure_entry.insert(0, heure_str)
+            # Préremplir la cible si visible
+            if self.decay_mode_var.get() == "activity_at_time":
+                self.decay_target_entry.delete(0, tk.END)
+                self.decay_target_entry.insert(0, f"{date_str} {heure_str}")
+            elif self.decay_mode_var.get() == "time_for_activity":
+                self.decay_final_entry.delete(0, tk.END)
+                self.decay_final_entry.insert(0, "")
+            # Focus sur le radionucléide
+            self.decay_radionuclide_cb.focus_set()
+
+        self.decay_calc_frame.bind("<Visibility>", prefill_decay_fields)
 
         # Radionucléide
         lbl_rad = ttk.Label(self.decay_calc_frame, text="Radionucléide utilisé:")
@@ -2730,27 +2947,13 @@ class Application(tk.Tk):
             style.map("TButton", background=[("active", "#d0d0d0")])
 
         # Style Treeview (zébrage)
-        style.map("Treeview", background=[("selected", "#0078d7")], foreground=[("selected", "#fff")])
+        style.map("Treeview", background=[("selected", "#002FB4")], foreground=[("selected", "#fff")])
         style.configure("Treeview.Heading", font=("Segoe UI", 11, "bold"))
 
     def set_status(self, message, duration=3000):
         self.status_var.set(message)
         if duration:
             self.after(duration, lambda: self.status_var.set(""))
-
-    def make_treeview_sortable(self, treeview):
-        def treeview_sort_column(tv, col, reverse):
-            l = [(tv.set(k, col), k) for k in tv.get_children('')]
-            # Try to convert to float for numeric sort, else string
-            try:
-                l.sort(key=lambda t: float(t[0].replace(',', '.')), reverse=reverse)
-            except Exception:
-                l.sort(key=lambda t: t[0], reverse=reverse)
-            for index, (val, k) in enumerate(l):
-                tv.move(k, '', index)
-            tv.heading(col, command=lambda: treeview_sort_column(tv, col, not reverse))
-        for col in treeview['columns']:
-            treeview.heading(col, command=lambda _col=col: treeview_sort_column(treeview, _col, False))
 
     def update_generateur_combobox(self):
         lots = ["Pas de Générateur"] + [gen["lot"] for gen in self.generators]
@@ -2779,6 +2982,8 @@ class Application(tk.Tk):
             self.label_patient_nom.config(text="—", bg="#4ECF39")
             self.label_big_activite.config(text="— MBq", bg="#ede31b")
             self.label_big_volume.config(text="— mL", bg="#e12727")
+            self.label_activite_moins10.config(text="-10% : — MBq")
+            self.label_activite_plus10.config(text="+10% : — MBq")
             return
         item = selected[0]
         values = self.tree_disp.item(item, "values")
@@ -2795,15 +3000,19 @@ class Application(tk.Tk):
             volume = None
         if activite is not None:
             self.label_big_activite.config(text=f"{activite:.2f} MBq", bg="#ede31b")
+            self.label_activite_moins10.config(text=f"-10% : {activite*0.9:.2f} MBq")
+            self.label_activite_plus10.config(text=f"+10% : {activite*1.1:.2f} MBq")
         else:
             self.label_big_activite.config(text="— MBq", bg="#ede31b")
+            self.label_activite_moins10.config(text="-10% : — MBq")
+            self.label_activite_plus10.config(text="+10% : — MBq")
         if volume is not None:
             self.label_big_volume.config(text=f"{volume:.3f} mL", bg="#e12727")
         else:
             self.label_big_volume.config(text="— mL", bg="#e12727")
 
     # --- Focus persistant pour Treeview (clé stable) ---
-    def preserve_treeview_selection(self, treeview, update_func, key_column=0):
+    def preserve_treeview_selection(self, treeview, update_func, key_column=0, key_func=None):
         # Sauvegarde la clé de la ligne sélectionnée (clé métier stable)
         selection = treeview.selection()
         key = None
@@ -2811,17 +3020,28 @@ class Application(tk.Tk):
             item = selection[0]
             values = treeview.item(item, "values")
             if values:
-                key = values[key_column]
+                if key_func:
+                    key = key_func(values)
+                else:
+                    key = values[key_column]
         update_func()
         # Restaure la sélection et le focus si possible
         if key is not None:
             for iid in treeview.get_children():
                 values = treeview.item(iid, "values")
-                if values and values[key_column] == key:
-                    treeview.selection_set(iid)
-                    treeview.focus(iid)
-                    treeview.see(iid)
-                    break
+                if values:
+                    if key_func:
+                        if key_func(values) == key:
+                            treeview.selection_set(iid)
+                            treeview.focus(iid)
+                            treeview.see(iid)
+                            break
+                    else:
+                        if values[key_column] == key:
+                            treeview.selection_set(iid)
+                            treeview.focus(iid)
+                            treeview.see(iid)
+                            break
 
     def update_mrp_expired_status(self):
         selected_nom = self.disp_mrp_cb.get()
@@ -2882,6 +3102,108 @@ class Application(tk.Tk):
             self.disp_mrp_cb.current(0)
         else:
             self.disp_mrp_cb.set("")
+
+    def apply_zebra_stripes(self, treeview):
+        # Applique le zébrage bleu clair #5EB2FE une ligne sur deux, même après tri
+        treeview.tag_configure("zebra", background="#89B9FF")
+        for idx, iid in enumerate(treeview.get_children()):
+            if idx % 2 == 1:
+                treeview.item(iid, tags=("zebra",))
+            else:
+                treeview.item(iid, tags=("",))
+
+    # Rendre le tri zébré dynamique après chaque tri
+    def make_treeview_sortable(self, treeview):
+        def treeview_sort_column(tv, col, reverse):
+            l = [(tv.set(k, col), k) for k in tv.get_children('')]
+            # Try to convert to float for numeric sort, else string
+            try:
+                l.sort(key=lambda t: float(t[0].replace(',', '.')), reverse=reverse)
+            except Exception:
+                l.sort(key=lambda t: t[0], reverse=reverse)
+            for index, (val, k) in enumerate(l):
+                tv.move(k, '', index)
+            tv.heading(col, command=lambda: treeview_sort_column(tv, col, not reverse))
+            # Réappliquer le zébrage après tri
+            if hasattr(self, 'apply_zebra_stripes'):
+                self.apply_zebra_stripes(tv)
+        for col in treeview['columns']:
+            treeview.heading(col, command=lambda _col=col: treeview_sort_column(treeview, _col, False))
+
+    def on_mrp_double_click(self, event):
+        region = self.tree_mrp.identify("region", event.x, event.y)
+        if region != "cell" or self.tree_mrp.identify_column(event.x) != f"#{len(self.tree_mrp['columns'])}":  # Colonne "Imprimer"
+            return
+        item = self.tree_mrp.focus()
+        if not item:
+            return
+        values = self.tree_mrp.item(item, "values")
+        nom = values[0]
+        numero_prep = values[1]
+        mrp = next((m for m in self.mrp_solutions if m.nom == nom and getattr(m, 'numero_prep', '') == numero_prep), None)
+        if mrp:
+            self.imprimer_etiquette_mrp(mrp)
+        else:
+            messagebox.showerror("Erreur", "Impossible de retrouver le MRP pour l'impression.")
+
+    def imprimer_etiquette_mrp(self, mrp):
+        from reportlab.pdfgen import canvas
+        from datetime import datetime
+        # Récupérer la taille personnalisée de l'étiquette
+        largeur_mm = getattr(self, 'etiquette_width_mm', 89)
+        hauteur_mm = getattr(self, 'etiquette_height_mm', 36)
+        largeur_pts = largeur_mm * 2.8346
+        hauteur_pts = hauteur_mm * 2.8346
+        scale_x = largeur_pts / (89 * 2.8346)
+        scale_y = hauteur_pts / (36 * 2.8346)
+        scale = min(scale_x, scale_y)
+        filename = f"etiquette_MRP_{mrp.nom}_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
+        c = canvas.Canvas(filename, pagesize=(largeur_pts, hauteur_pts))
+        marge_gauche = int(6 * scale)
+        marge_haut = int(6 * scale)
+        espace_ligne = int(15 * scale)
+        decalage_bas = int(4 * 2.8346 * scale)
+        y = hauteur_pts - marge_haut - decalage_bas
+        font_titre = max(8, int(15 * scale))
+        font_soustitre = max(7, int(12 * scale))
+        font_texte = max(6, int(10 * scale))
+        c.setFont("Helvetica-Bold", font_titre)
+        c.drawString(marge_gauche, y, f"{mrp.nom}")
+        y -= espace_ligne + int(2 * scale)
+        c.setFont("Helvetica-Bold", font_soustitre)
+        c.drawString(marge_gauche, y, f"N° Préparation : {getattr(mrp, 'numero_prep', '')}")
+        y -= espace_ligne
+        c.setFont("Helvetica", font_texte)
+        c.drawString(marge_gauche, y, f"Activité initiale : {mrp.activite_initiale:.2f} MBq à {mrp.creation_time.strftime('%H:%M')}")
+        y -= espace_ligne
+        c.drawString(marge_gauche, y, f"Volume initial : {mrp.volume:.1f} mL")
+        y -= espace_ligne
+        expiration_mrp = getattr(mrp, 'expiration_mrp', None)
+        expiration_mrp_str = expiration_mrp.strftime('%Y-%m-%d à %H:%M') if expiration_mrp else "N/A"
+        c.drawString(marge_gauche, y, f"Expiration MRP : {expiration_mrp_str}")
+        y -= espace_ligne
+        c.drawString(marge_gauche, y, f"Générateur : {getattr(mrp, 'lot_generateur', '')}       Trousse : {mrp.lot}")
+        y -= espace_ligne
+        c.setFont("Helvetica", font_texte)
+        image_path = r"C:\\radioactif.png"
+        try:
+            img_size = int(50 * scale)
+            # Positionner en haut à droite
+            x_img = largeur_pts - img_size - marge_gauche
+            y_img = hauteur_pts - img_size - marge_haut
+            c.drawImage(image_path, x_img, y_img, width=img_size, height=img_size, preserveAspectRatio=True, mask='auto')
+        except Exception:
+            c.setFont("Helvetica", max(5, int(7 * scale)))
+            c.drawString(largeur_pts - int(40 * scale), int(8 * scale), "Symbole radiation")
+        c.rect(1, 1, largeur_pts-2, hauteur_pts-2)
+        c.showPage()
+        c.save()
+        try:
+            if os.name == 'nt':
+                os.startfile(filename, "print")
+        except Exception as e:
+            messagebox.showerror("Erreur impression", f"Erreur lors de l'impression automatique : {e}")
+        messagebox.showinfo("Étiquette", f"Étiquette MRP enregistrée sous : {filename}")
 
 
 if __name__ == "__main__":
