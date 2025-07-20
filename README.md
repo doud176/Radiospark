@@ -9,10 +9,10 @@ Radiospark est un outil et ne saurai se substituer à l'expertise et au contrôl
 ## 🚀 Fonctionnalités
 
 - Gestion d'une banque de radionucléides et de MRP
-- Création de MRP (Activité et volume initiaux, activité et volume actuel, N° de Lot et date d'expiration des trousses et générateurs, N° de préparation)
+- Création de MRP (Activité et volume initiaux, Activité et volume actuel, N° de Lot et date d'expiration des trousses et générateurs, N° de préparation)
 - Gestion des patients (Identité, Prescription, Poids)
 - Gestion des générateurs (Activité à calibration, Date d'expiration, N° de Lot, ...)
-- Dispensation de seringues (Interface complète avec calculs dynamiques, système d'alerte et génération d'étiquettes nominatives)
+- Dispensation de seringues (Interface complète avec calculs dynamiques, Système d'alerte et génération d'étiquettes nominatives)
 - Historique de seringues et des MRP préparés avec export possible au format PDF (.pdf) ou Excel® (.xls)
 - Options (Modification de la taille des étiquettes et de l'ordre des onglets)
 - Calculatrice de décroissance (Calcul de l'activité à une date souhaitée ou calcul de la date pour l'activité souhaitée)
