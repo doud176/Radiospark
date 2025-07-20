@@ -3,7 +3,7 @@
 L'application Radiospark se substitue temporairementaux logiciels métiers de gestion des radiopharmaceutiques (Vénus®, PharmaManager®, ...) lors de l'indisponibilité prolongée de ces derniers (Panne, Cyberattaque, ...).
 
 L'application est, pour le moment, uniquement disponible en français.
-Radiospark est un outil et ne saurai se substituer à l'expertise et au contrôle du Préparateur en pharmacie hospitalière et du Radiopharmacien.
+Radiospark est un outil et ne saurait se substituer à l'expertise et au contrôle du Préparateur en pharmacie hospitalière et du Radiopharmacien.
 
 
 ## 🚀 Fonctionnalités
