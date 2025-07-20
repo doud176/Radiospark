@@ -1,6 +1,6 @@
 # Radiospark
 
-L'application Radiospark se substitue temporairementaux logiciels métiers de gestion des radiopharmaceutique (Vénus®, PharmaManager®, ...) lors de l'indisponibilité prolongée de ces derniers (Panne, Cyberattaque, ...).
+L'application Radiospark se substitue temporairementaux logiciels métiers de gestion des radiopharmaceutiques (Vénus®, PharmaManager®, ...) lors de l'indisponibilité prolongée de ces derniers (Panne, Cyberattaque, ...).
 
 L'application est, pour le moment, uniquement disponible en français.
 Radiospark est un outil et ne saurai se substituer à l'expertise et au contrôle du Préparateur en pharmacie hospitalière et du Radiopharmacien.
@@ -11,7 +11,7 @@ Radiospark est un outil et ne saurai se substituer à l'expertise et au contrôl
 - Gestion d'une banque de radionucléides et de MRP
 - Création de MRP (Activité et volume initiaux, activité et volume actuel, N° de Lot et date d'expiration des trousses et générateurs, N° de préparation)
 - Gestion des patients (Identité, Prescription, Poids)
-- Gestion des générateurs
+- Gestion des générateurs (Activité à calibration, Date d'expiration, N° de Lot, ...)
 - Dispensation de seringues (Interface complète avec calculs dynamiques, système d'alerte et génération d'étiquettes nominatives)
 - Historique de seringues et des MRP préparés avec export possible au format PDF (.pdf) ou Excel® (.xls)
 - Options (Modification de la taille des étiquettes et de l'ordre des onglets)
