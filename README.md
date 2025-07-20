@@ -25,7 +25,7 @@ Radiospark est un outil et ne saurai se substituer à l'expertise et au contrôl
 ## 📦 Installation
 
 - Téléchargement de l'exécutable : https://github.com/doud176/Radiospark/tags (Pour la version MacOS, télécharger la version RadiosparkMacOS.exe)
-- Avant l'exécution de l'application, ajouter un logo de trègle radioactif ***au format PNG et nommez-le "radioactif"*** à la racine de votre lecteur C: au chemin suivant : "C:\radioactif.png. Vous pourrez en trouver à l'adresse suivante : https://www.flaticon.com/fr/chercher?word=radioactif
+- Avant l'exécution de l'application, ajouter un logo de trèfle radioactif ***au format PNG et nommez-le "radioactif"*** à la racine de votre lecteur C: au chemin suivant : "C:\radioactif.png. Vous pourrez en trouver à l'adresse suivante : https://www.flaticon.com/fr/chercher?word=radioactif
 - Exécuter le fichier Radiospark(MacOS).exe
 - Patientez environ 10 sec à 2 minutes selon les performances de votre ordinateur
 - Si utilisation d'un ordinateur personnel, télécharger et installer le pilote de votre imprimante d'étiquette (Identifier la marque et le modèle de votre imprimante et rechercher le pilote directement sur votre navigateur). Au besoin, rapprochez-vous de votre DSI.
@@ -34,7 +34,7 @@ Radiospark est un outil et ne saurai se substituer à l'expertise et au contrôl
 ## 📁 Structure technique
 
 - Architecture des fichiers : Le programme échange uniquement avec la base de données nommée *Data.pkl* qui est crée lors de la première exécution au même endroit où le programme se situe.
-- Sécurité et gestion des données : Les données sont stockées et gérées sur l'ordinateur qui exécute le logiciel, en local. La sécurité des données imcombe à l'utilisateur.
+- Sécurité et gestion des données : Les données sont stockées et gérées sur l'ordinateur qui exécute le logiciel, en local. La sécurité des données incombe à l'utilisateur.
 
 ## 🆘 Support et maintenance
 
