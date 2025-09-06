@@ -24,9 +24,9 @@ Radiospark est un outil de support et ne saurait se substituer à l'expertise et
 
 ## 📦 Installation
 
-- Téléchargement de l'exécutable : https://github.com/doud176/Radiospark/tags (Pour la version MacOS, télécharger la version RadiosparkMacOS.exe)
+- Téléchargement de l'exécutable : https://github.com/doud176/Radiospark/tags
 - Avant l'exécution de l'application, ajouter un logo de trèfle radioactif ***au format PNG et nommez-le "radioactif"*** à la racine de votre lecteur C: au chemin suivant : "C:\radioactif.png. Vous pourrez en trouver à l'adresse suivante : https://www.flaticon.com/fr/chercher?word=radioactif
-- Exécuter le fichier Radiospark(MacOS).exe
+- Exécuter le fichier Radiospark.exe
 - Patientez environ 10 sec à 2 minutes selon les performances de votre ordinateur
 - Si utilisation d'un ordinateur personnel, télécharger et installer le pilote de votre imprimante d'étiquette (Identifier la marque et le modèle de votre imprimante et rechercher le pilote directement sur votre navigateur). Au besoin, rapprochez-vous de votre DSI.
 - À vous de jouer !
