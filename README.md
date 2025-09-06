@@ -3,13 +3,13 @@
 L'application Radiospark se substitue temporairementaux logiciels métiers de gestion des radiopharmaceutiques (Vénus®, PharmaManager®, ...) lors de l'indisponibilité prolongée de ces derniers (Panne, Cyberattaque, ...).
 
 L'application est, pour le moment, uniquement disponible en français.
-Radiospark est un outil et ne saurait se substituer à l'expertise et au contrôle du Préparateur en pharmacie hospitalière et du Radiopharmacien.
+Radiospark est un outil de support et ne saurait se substituer à l'expertise et au contrôle du Préparateur en pharmacie hospitalière et du Radiopharmacien.
 
 
 ## 🚀 Fonctionnalités
 
 - Gestion d'une banque de radionucléides et de MRP
-- Création de MRP (Activité et volume initiaux, Activité et volume actuel, N° de Lot et date d'expiration des trousses et générateurs, N° de préparation)
+- Création de MRP (Activité et volume initiaux, Activité et volume actuel, N° de Lot et date d'expiration des trousses et générateurs, N° de préparation, Génération automatique d'étiquette)
 - Gestion des patients (Identité, Prescription, Poids)
 - Gestion des générateurs (Activité à calibration, Date d'expiration, N° de Lot, ...)
 - Dispensation de seringues (Interface complète avec calculs dynamiques, Système d'alerte et génération d'étiquettes nominatives)
@@ -34,7 +34,7 @@ Radiospark est un outil et ne saurait se substituer à l'expertise et au contrô
 ## 📁 Structure technique
 
 - Architecture des fichiers : Le programme échange uniquement avec la base de données nommée *Data.pkl* qui est crée lors de la première exécution au même endroit où le programme se situe.
-- Sécurité et gestion des données : Les données sont stockées et gérées sur l'ordinateur qui exécute le logiciel, en local. La sécurité des données incombe à l'utilisateur.
+- Sécurité et gestion des données : Les données sont stockées et gérées sur l'ordinateur qui exécute le logiciel, en local. Les données ne sont pas cryptées et la sécurité des données incombe à l'utilisateur.
 
 ## 🆘 Support et maintenance
 
