@@ -136,6 +136,19 @@ class Application(tk.Tk):
             self.historique_patients = []
         if not hasattr(self, 'historique_mrp') or self.historique_mrp is None:
             self.historique_mrp = []
+        if not hasattr(self, 'tab_order') or self.tab_order is None:
+            # Ordre par défaut des onglets
+            self.tab_order = [
+                "Dispensation de Seringues",
+                "Création MRP", 
+                "Patients",
+                "Générateur",
+                "Banque de radionucléides",
+                "Historique des seringues",
+                "Historique des MRP",
+                "Options",
+                "Calculatrice de décroissance"
+            ]
 
     # --- Persistence Methods ---
 
@@ -872,8 +885,10 @@ class Application(tk.Tk):
             if histo:
                 # Prendre la dernière entrée (par date)
                 last = max(histo, key=lambda h: h["date"])
+                # Un patient n'est vert que si sa dernière action est "Validé"
                 if last.get("action", "") == "Validé":
                     is_valid = True
+            # Par défaut, les patients ne sont pas verts (pas de seringue validée)
             tag = "valid" if is_valid else "notvalid"
             self.tree_patients.insert("", tk.END, values=(
                 patient["nom"],
@@ -883,7 +898,7 @@ class Application(tk.Tk):
                 patient.get("poids", ""),
                 patient.get("date_naissance", "")
             ), tags=(tag,))
-        # Appliquer la couleur verte pour les patients validés
+        # Appliquer la couleur verte pour les patients validés uniquement
         self.tree_patients.tag_configure("valid", background="#00CC66")
         self.tree_patients.tag_configure("notvalid", background="")
         self.save_data()
